@@ -1,0 +1,38 @@
+name: 'airflow_dbt_project'
+version: '1.0.0'
+config-version: 2
+
+profile: 'default'
+
+model-paths: ["models"]
+analysis-paths: ["analyses"]
+test-paths: ["tests"]
+seed-paths: ["seeds"]
+macro-paths: ["macros"]
+snapshot-paths: ["snapshots"]
+
+clean-targets:
+  - "target"
+  - "logs"
+
+models:
+  airflow_dbt_project:
+    # Default materialization for all models
+    +materialized: view
+    
+    # Postgres specific configurations
+    postgres:
+      +schema: dbt_postgres
+      +materialized: table
+      +enabled: "{{ target.type == 'postgres' }}"
+      
+    # Databricks specific configurations
+    databricks:
+      +schema: dbt_databricks
+      +materialized: table
+      +enabled: "{{ target.type == 'databricks' }}"
+      
+    # BigQuery specific configurations
+    bigquery:
+      +enabled: "{{ target.type == 'bigquery' }}"
+      +materialized: table

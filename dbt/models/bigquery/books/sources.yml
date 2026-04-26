@@ -1,0 +1,44 @@
+version: 2
+sources:
+  - name: book_dataset
+    schema: book_dataset_stg
+    tables:
+      - name: books
+        description: "Book dataset with book details"
+        columns:
+          - name: ISBN
+            description: "Unique identifier for the book"
+          - name: Book-Title
+            description: "Title of the book"
+            tests:
+              - not_null
+          - name: Book-Author
+            description: "Author of the book"
+          - name: Year-Of-Publication
+            description: "Year the book was published"
+          - name: Publisher
+            description: "Publisher of the book"
+          - name: Image-URL-S
+            description: "Small image URL of the book cover"
+          - name: Image-URL-M
+            description: "Medium image URL of the book cover"
+          - name: Image-URL-L
+            description: "Large image URL of the book cover"
+      - name: ratings
+        description: "Ratings dataset with user ratings for books"
+        columns:
+          - name: User-ID
+            description: "Unique identifier for the user"
+          - name: ISBN
+            description: "Unique identifier for the book"
+          - name: Book-Rating
+            description: "Rating given by the user to the book"
+      - name: users
+        description: "Users dataset with user details"
+        columns:
+          - name: User-ID
+            description: "Unique identifier for the user"
+          - name: Location
+            description: "Location of the user"
+          - name: Age
+            description: "Age of the user"

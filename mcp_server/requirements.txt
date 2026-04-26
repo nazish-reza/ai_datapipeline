@@ -1,0 +1,9 @@
+mcp
+requests
+fastmcp
+uvicorn
+fastapi
+httpx
+requests
+dbt-core
+dbt-postgres

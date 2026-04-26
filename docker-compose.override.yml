@@ -1,0 +1,39 @@
+services:
+  scheduler:
+    volumes:
+      - /Users/nazishreza/Developer/DataEngneering/ai-datapipeline/dbt:/usr/local/airflow/dbt
+    ports:
+      - "8081:8081"
+
+  dag-processor:
+    volumes:
+      - /Users/nazishreza/Developer/DataEngneering/ai-datapipeline/dbt:/usr/local/airflow/dbt
+
+  triggerer:
+    volumes:
+      - /Users/nazishreza/Developer/DataEngneering/ai-datapipeline/dbt:/usr/local/airflow/dbt
+  
+  api-server:
+    volumes:
+      - /Users/nazishreza/Developer/DataEngneering/ai-datapipeline/dbt:/usr/local/airflow/dbt
+
+  fastapi:
+    image: airflow-dbt_b57794-fastapi:latest
+    ports:
+      - "8001:8001"
+      
+  mcp:
+    image: airflow-dbt_b57794-mcp:latest
+    ports:
+      - "9000:9000"
+    environment:
+      AIRFLOW_URL: http://host.docker.internal:8080
+      AIRFLOW_USERNAME: admin
+      AIRFLOW_PASSWORD: admin
+
+    volumes:
+      - ./dbt:/shared/dbt
+      - ./dags:/shared/dags
+
+    depends_on:
+      - api-server

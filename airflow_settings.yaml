@@ -1,0 +1,42 @@
+# This file allows you to configure Airflow Connections, Pools, and Variables in a single place for local development only.
+# NOTE: json dicts can be added to the conn_extra field as yaml key value pairs. See the example below.
+
+# For more information, refer to our docs: https://www.astronomer.io/docs/astro/cli/develop-project#configure-airflow_settingsyaml-local-development-only
+# For questions, reach out to: https://support.astronomer.io
+# For issues create an issue ticket here: https://github.com/astronomer/astro-cli/issues
+
+airflow:
+  connections:
+    - conn_id: postgres_default
+      conn_type: postgres
+      conn_host: 
+      conn_schema: dvdrental
+      conn_login: postgres
+      conn_password: 
+      conn_port: 5432
+      conn_extra: {}
+
+    - conn_id: databricks_default
+      conn_type: databricks
+      conn_host: https://<your-databricks-workspace>
+      conn_login: token
+      conn_password: <your-databricks-token>
+      conn_extra:
+        host: https://<your-databricks-workspace>
+        token: <your-databricks-token>
+
+    - conn_id: google_cloud_bigquery
+      conn_type: google_cloud_platform
+      conn_extra:
+        project: ${BIGQUERY_PROJECT}
+        keyfile_json: ${BIGQUERY_KEYFILE_JSON}
+    - conn_id: fastapi_conn
+      conn_type: HTTP
+      conn_host: http://fastapi:8000
+  pools:
+    - pool_name:
+      pool_slot:
+      pool_description:
+  variables:
+    - variable_name:
+      variable_value:

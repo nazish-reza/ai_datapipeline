@@ -1,0 +1,12 @@
+.git
+.env
+.DS_Store
+__pycache__/
+astro
+.vscode
+.venv
+airflow-webserver.pid
+webserver_config.py
+airflow.cfg
+airflow.db
+dbt/key/bq_key.json

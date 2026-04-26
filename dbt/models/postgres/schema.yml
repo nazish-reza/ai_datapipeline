@@ -1,0 +1,23 @@
+version: 2
+
+sources:
+  - name: postgres_raw
+    database: "{{ target.get('dbname', target.get('database')) }}"
+    schema: public
+    tables:
+      - name: actor
+        description: "Source table in Postgres (replace with your real table name)"
+        columns:
+          - name: actor_id
+            description: "Primary id"
+            tests: [not_null, unique]
+          - name: first_name
+            description: "Name field"
+            tests: [not_null]
+
+models:
+  - name: my_postgres_model
+    description: "Transform that selects from the Postgres raw table"
+    columns:
+      - name: id
+        tests: [not_null]

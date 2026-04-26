@@ -1,0 +1,19 @@
+# DBT core + adapters for Postgres, Databricks and BigQuery
+dbt-core
+dbt-postgres
+dbt-databricks
+dbt-bigquery
+astronomer-cosmos
+fastapi
+python-multipart
+
+# Airflow providers required by DAGs/operators
+apache-airflow-providers-postgres
+apache-airflow-providers-databricks
+apache-airflow-providers-google
+apache-airflow-providers-fab
+
+
+# NOTE
+# - If you use DBT Cloud instead of local dbt-core, add apache-airflow-providers-dbt-cloud
+# - Pin versions if you run into resolver issues with the Astronomer runtime

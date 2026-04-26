@@ -1,0 +1,21 @@
+version: 2
+
+sources:
+  - name: databricks_raw
+    database: "{{ target.get('catalog', target.get('database')) }}"
+    schema: default
+    tables:
+      - name: raw_table
+        description: "Source table in Databricks (replace with your real table name or table path)"
+        columns:
+          - name: id
+            tests: [not_null, unique]
+          - name: name
+            tests: [not_null]
+
+models:
+  - name: my_databricks_model
+    description: "Transform that selects from the Databricks raw table"
+    columns:
+      - name: id
+        tests: [not_null]

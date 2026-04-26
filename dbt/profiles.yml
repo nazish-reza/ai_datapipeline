@@ -1,0 +1,28 @@
+default:
+  target: dev_postgres
+  outputs:
+    dev_postgres:
+      type: postgres
+      host: 192.168.0.112
+      user: postgres
+      password: password
+      port: 5432
+      dbname: dvdrental
+      schema: dbt_default
+      threads: 4
+
+    databricks:
+      type: databricks
+      host: "https://<your-databricks-workspace>"
+      token: "<your-databricks-token>"
+      catalog: hive_metastore
+      schema: default
+      threads: 4
+
+    bigquery:
+      type: bigquery
+      method: service-account
+      project: genuine-arena-458814-u7
+      dataset: dbt_dataset
+      threads: 4
+      keyfile: key/bq_key.json
