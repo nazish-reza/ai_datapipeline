@@ -10,3 +10,5 @@ webserver_config.py
 airflow.cfg
 airflow.db
 dbt/key/bq_key.json
+dbt/target/
+dbt/logs/
