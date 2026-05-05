@@ -41,7 +41,8 @@ jobs:
 
       - name: Generate dbt models
         env:
-          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          API_KEY: ${{ secrets.API_KEY }}
+          INVOKE_URL: ${{ secrets.INVOKE_URL }}
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           python scripts/generate_dbt_models.py
