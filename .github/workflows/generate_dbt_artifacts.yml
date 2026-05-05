@@ -1,0 +1,65 @@
+name: Generate dbt Models from Mapping
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "mapping/**"        # triggers when any file in mapping/ is added or changed
+
+permissions:
+  contents: write           # needed to commit generated files back to the PR branch
+  pull-requests: write
+
+jobs:
+  generate-dbt-models:
+    name: Generate dbt SQL & YML
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout PR branch
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}   # checks out the PR branch, not main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        run: pip install -r scripts/requirements.txt
+
+      - name: Detect changed mapping files
+        id: changed
+        run: |
+          # Get list of changed files in mapping/ folder compared to base branch
+          git diff --name-only origin/${{ github.base_ref }}...HEAD -- mapping/ > changed_mappings.txt
+          echo "Changed mapping files:"
+          cat changed_mappings.txt
+          echo "files=$(cat changed_mappings.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
+      - name: Generate dbt models
+        env:
+          NVIDIA_API_KEY: ${{ secrets.NVIDIA_API_KEY }}
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
+        run: |
+          python scripts/generate_dbt_models.py
+
+      - name: Check if files were generated
+        run: |
+          echo "Generated files:"
+          find dbt/models -name "*.sql" -o -name "*.yml" | sort
+
+      - name: Commit generated dbt files
+        run: |
+          git config user.name  "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add dbt/models/
+          if git diff --staged --quiet; then
+            echo "✅ No changes to commit — models already up to date"
+          else
+            git commit -m "chore: auto-generate dbt models from mapping sheet [skip ci]"
+            git push origin ${{ github.head_ref }}
+            echo "✅ Committed and pushed generated dbt files"
+          fi
