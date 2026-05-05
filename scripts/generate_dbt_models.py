@@ -3,7 +3,7 @@ generate_dbt_models.py
 ─────────────────────
 Runs inside GitHub Actions. Reads all .xlsx files from the mapping/ folder
 (or only changed ones if CHANGED_FILES env var is set), generates dbt SQL
-and YML files, and writes them to dbt/models/bigquery.
+and YML files, and writes them to dbt/models/.
 """
 
 import requests
@@ -12,14 +12,20 @@ import os
 import time
 import pandas as pd
 from pathlib import Path
+from requests.exceptions import (
+    ChunkedEncodingError,
+    ConnectionError,
+    Timeout,
+    RequestException,
+)
 
 # ── Config ────────────────────────────────────────────────────────────
 INVOKE_URL = os.environ.get("INVOKE_URL", "")
 API_KEY = os.environ.get("API_KEY", "")
-MAPPING_DIR = Path("mapping")       # folder with .xlsx mapping files
-DBT_MODELS_DIR = Path("dbt/models/bigquery")  # output folder inside repo
-DELAY_BETWEEN_CALLS = 20                    # seconds between LLM calls
-MAX_RETRIES = 3
+MAPPING_DIR = Path("mapping")
+DBT_MODELS_DIR = Path("dbt/models/bigquery")
+DELAY_BETWEEN_CALLS = 20
+MAX_RETRIES = 5          # more retries since connection drops are common
 TIMEOUT = (10, 300)
 
 HEADERS = {
@@ -32,12 +38,7 @@ HEADERS = {
 # 1. Determine which mapping files to process
 # ─────────────────────────────────────────────────────────────────────
 def get_mapping_files() -> list[Path]:
-    """
-    If CHANGED_FILES env var is set (from GitHub Actions), only process those.
-    Otherwise process all .xlsx files in mapping/ folder.
-    """
     changed = os.environ.get("CHANGED_FILES", "").strip()
-
     if changed:
         files = [
             Path(f) for f in changed.split()
@@ -47,7 +48,6 @@ def get_mapping_files() -> list[Path]:
     else:
         files = list(MAPPING_DIR.glob("**/*.xlsx"))
         print(f"Processing all {len(files)} mapping file(s) in {MAPPING_DIR}/")
-
     return files
 
 
@@ -106,7 +106,7 @@ def detect_source_tables(xl: pd.ExcelFile) -> dict:
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 4. LLM call with retry + timeout
+# 4. LLM call — handles all network errors including ChunkedEncodingError
 # ─────────────────────────────────────────────────────────────────────
 def call_llm(prompt: str) -> str:
     for attempt in range(1, MAX_RETRIES + 1):
@@ -141,33 +141,54 @@ def call_llm(prompt: str) -> str:
             full_answer = ""
             chunk_count = 0
 
-            for line in response.iter_lines():
-                if line:
-                    decoded = line.decode("utf-8")
-                    if decoded.startswith("data: ") and decoded != "data: [DONE]":
-                        try:
-                            chunk = json.loads(decoded[6:])
-                            choices = chunk.get("choices", [])
-                            if not choices:
-                                continue
-                            delta = choices[0].get("delta", {})
-                            if delta.get("content"):
-                                full_answer += delta["content"]
-                                chunk_count += 1
-                                if chunk_count % 20 == 0:
-                                    print(f"Receiving... ({len(full_answer)} chars)")
-                        except json.JSONDecodeError:
-                            pass
+            try:
+                for line in response.iter_lines():
+                    if line:
+                        decoded = line.decode("utf-8")
+                        if decoded.startswith("data: ") and decoded != "data: [DONE]":
+                            try:
+                                chunk = json.loads(decoded[6:])
+                                choices = chunk.get("choices", [])
+                                if not choices:
+                                    continue
+                                delta = choices[0].get("delta", {})
+                                if delta.get("content"):
+                                    full_answer += delta["content"]
+                                    chunk_count += 1
+                                    if chunk_count % 20 == 0:
+                                        print(f"      ⏳ Receiving... ({len(full_answer)} chars)")
+                            except json.JSONDecodeError:
+                                pass
+
+            except ChunkedEncodingError as e:
+                #Connection dropped mid-stream — if we got partial content, retry
+                print(f"Stream cut off after {len(full_answer)} chars (attempt {attempt}/{MAX_RETRIES}): {e}")
+                if attempt < MAX_RETRIES:
+                    wait = DELAY_BETWEEN_CALLS * attempt
+                    print(f"Retrying in {wait}s...")
+                    time.sleep(wait)
+                    continue
+                else:
+                    raise
+
+            # Only return if we got a meaningful response
+            if len(full_answer) < 10:
+                print(f"Response too short ({len(full_answer)} chars). Retrying...")
+                time.sleep(DELAY_BETWEEN_CALLS)
+                continue
 
             print(f"Got {len(full_answer)} chars")
             return full_answer.strip()
 
-        except requests.exceptions.Timeout:
-            print(f"Timed out (attempt {attempt}/{MAX_RETRIES}). Retrying...")
-            time.sleep(DELAY_BETWEEN_CALLS)
-        except requests.exceptions.ConnectionError as e:
-            print(f"Connection error (attempt {attempt}/{MAX_RETRIES}): {e}")
-            time.sleep(DELAY_BETWEEN_CALLS)
+        except (Timeout, ConnectionError) as e:
+            wait = DELAY_BETWEEN_CALLS * attempt
+            print(f"Network error (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}. Waiting {wait}s...")
+            time.sleep(wait)
+
+        except RequestException as e:
+            wait = DELAY_BETWEEN_CALLS * attempt
+            print(f"Request error (attempt {attempt}/{MAX_RETRIES}): {e}. Waiting {wait}s...")
+            time.sleep(wait)
 
     raise RuntimeError(f"Failed after {MAX_RETRIES} retries.")
 
@@ -246,11 +267,10 @@ def process_mapping(mapping_file: Path):
     sheets = xl.sheet_names
     print(f"Found {len(sheets)} entities: {sheets}")
 
-    # Detect raw source tables
     source_tables = detect_source_tables(xl)
     print(f"Raw source tables: {list(source_tables.keys())}")
 
-    # Generate sources.yml (once per mapping file)
+    # Generate sources.yml once
     sources_path = DBT_MODELS_DIR / "sources.yml"
     if not sources_path.exists():
         print(f"\nGenerating sources.yml...")
@@ -283,14 +303,12 @@ def process_mapping(mapping_file: Path):
 
         print(f"Sources: {entity_sources}")
 
-        # SQL
-        print("Generating SQL...")
+        print("   Generating SQL...")
         sql_content = call_llm(sql_prompt(entity_name, layer, mapping_text, entity_sources))
         save_file(sql_content, DBT_MODELS_DIR / layer / f"{entity_name}.sql")
         time.sleep(DELAY_BETWEEN_CALLS)
 
-        # YAML
-        print("Generating YAML...")
+        print("   Generating YAML...")
         yml_content = call_llm(yml_prompt(entity_name, mapping_text))
         save_file(yml_content, DBT_MODELS_DIR / layer / f"_{entity_name}.yml")
         time.sleep(DELAY_BETWEEN_CALLS)
