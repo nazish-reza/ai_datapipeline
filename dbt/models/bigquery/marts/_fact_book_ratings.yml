@@ -1,0 +1,33 @@
+version: 2
+
+models:
+  - name: fact_book_ratings
+    description: "Fact table containing book ratings with derived categories and timestamps"
+    columns:
+      - name: rating_id
+        description: "Primary key, generated as a row number"
+        data_tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: "Foreign key referencing users, cast from User-ID"
+        data_tests:
+          - not_null
+      - name: book_id
+        description: "Foreign key referencing books, cast from ISBN"
+        data_tests:
+          - not_null
+      - name: rating
+        description: "Original book rating value"
+        data_tests:
+          - not_null
+      - name: rating_category
+        description: "Derived category based on rating value (High, Medium, Low)"
+        data_tests:
+          - not_null
+          - accepted_values:
+              values: ['High', 'Medium', 'Low']
+      - name: rating_date
+        description: "Timestamp when the rating was recorded, set to current timestamp"
+        data_tests:
+          - not_null

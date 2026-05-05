@@ -1,0 +1,23 @@
+sources:
+  - name: raw
+    tables:
+      - name: books
+        columns:
+          - name: Book-Author
+          - name: Book-Title
+          - name: ISBN
+          - name: Image-URL-L
+          - name: Image-URL-M
+          - name: Image-URL-S
+          - name: Publisher
+          - name: Year-Of-Publication
+      - name: users
+        columns:
+          - name: Age
+          - name: Location
+          - name: User-ID
+      - name: ratings
+        columns:
+          - name: Book-Rating
+          - name: ISBN
+          - name: User-ID

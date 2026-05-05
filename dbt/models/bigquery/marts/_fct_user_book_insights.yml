@@ -1,0 +1,41 @@
+version: 2
+
+models:
+  - name: fct_user_book_insights
+    description: Fact table containing user-book interaction insights including ratings, age groups, and derived metrics.
+    columns:
+      - name: insight_id
+        description: Primary key for the insights table, generated as row number.
+        data_tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: Foreign key referencing the users table.
+        data_tests:
+          - not_null
+      - name: book_id
+        description: Foreign key referencing the books table.
+        data_tests:
+          - not_null
+      - name: author_name
+        description: Name of the book author.
+      - name: publisher_name
+        description: Name of the book publisher.
+      - name: user_age_group
+        description: Age group classification of the user.
+        data_tests:
+          - accepted_values:
+              values: ['Under 18', '18-25', '26-40', '40+', 'Unknown']
+      - name: avg_user_rating
+        description: Average rating given by the user across all books.
+      - name: avg_book_rating
+        description: Average rating for the book across all users.
+      - name: rating_deviation
+        description: Difference between individual rating and average book rating.
+      - name: user_location_country
+        description: Country extracted from user's location.
+      - name: high_rating_flag
+        description: Flag indicating if rating is 8 or higher.
+        data_tests:
+          - accepted_values:
+              values: [0, 1]
