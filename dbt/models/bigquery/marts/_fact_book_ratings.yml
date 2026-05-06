@@ -1,0 +1,28 @@
+version: 2
+
+models:
+  - name: fact_book_ratings
+    description: Fact table containing book ratings with categorized rating levels and timestamps
+    columns:
+      - name: rating_id
+        description: Primary key for the fact table, auto-generated via row_number()
+        data_tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: Foreign key to users dimension, sourced from User-ID and cast to integer
+        data_tests:
+          - not_null
+      - name: book_id
+        description: Foreign key to books dimension, sourced from ISBN and cast to string
+        data_tests:
+          - not_null
+      - name: rating
+        description: The raw book rating value from the source
+      - name: rating_category
+        description: Derived category based on the rating value (High: >=8, Medium: 5-7, Low: otherwise)
+        data_tests:
+          - accepted_values:
+              values: ['High', 'Medium', 'Low']
+      - name: rating_date
+        description: Timestamp when the rating was recorded, set to current timestamp

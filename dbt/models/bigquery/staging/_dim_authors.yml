@@ -1,0 +1,16 @@
+version: 2
+
+models:
+  - name: dim_authors
+    description: Dimension table containing unique author information with surrogate keys.
+    columns:
+      - name: author_id
+        description: Surrogate key
+        data_tests:
+          - not_null
+          - unique
+      - name: author_name
+        description: Distinct trimmed author name from Book-Author column.
+        data_tests:
+          - not_null
+          - accepted_values
