@@ -4,10 +4,10 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - "mapping/**"        # triggers when any file in mapping/ is added or changed
+      - "mapping/**"
 
 permissions:
-  contents: write           # needed to commit generated files back to the PR branch
+  contents: write
   pull-requests: write
 
 jobs:
@@ -15,12 +15,17 @@ jobs:
     name: Generate dbt SQL & YML
     runs-on: ubuntu-latest
 
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
     steps:
       - name: Checkout PR branch
         uses: actions/checkout@v4
         with:
-          ref: ${{ github.head_ref }}   # checks out the PR branch, not main
+          ref: ${{ github.head_ref }}
           fetch-depth: 0
+          # Use the default GITHUB_TOKEN so commits are attributed to the
+          # verified github-actions bot identity
+          token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -33,7 +38,6 @@ jobs:
       - name: Detect changed mapping files
         id: changed
         run: |
-          # Get list of changed files in mapping/ folder compared to base branch
           git diff --name-only origin/${{ github.base_ref }}...HEAD -- mapping/ > changed_mappings.txt
           echo "Changed mapping files:"
           cat changed_mappings.txt
@@ -47,15 +51,18 @@ jobs:
         run: |
           python scripts/generate_dbt_models.py
 
-      - name: Check if files were generated
+      - name: Check generated files
         run: |
           echo "Generated files:"
           find dbt/models -name "*.sql" -o -name "*.yml" | sort
 
       - name: Commit generated dbt files
         run: |
+          # Use the verified github-actions bot email
+          # This exact email is GitHub's official bot identity → commits show as "Verified"
           git config user.name  "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+
           git add dbt/models/
           if git diff --staged --quiet; then
             echo "No changes to commit — models already up to date"
