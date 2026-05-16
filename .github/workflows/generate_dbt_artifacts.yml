@@ -14,23 +14,17 @@ jobs:
   generate-dbt-models:
     name: Generate dbt SQL & YML
     runs-on: ubuntu-latest
-    # NO job-level if condition — job must always run so the required
-    #    check always reports back. A skipped job leaves the check as
-    #    "pending" forever, blocking the merge.
 
     steps:
-      - name: Check if bot commit (skip re-runs)
+      - name: Check if bot commit
         id: guard
         run: |
-          # On pull_request events, head_commit is accessed differently
           ACTOR="${{ github.actor }}"
           echo "Triggered by: $ACTOR"
           if [ "$ACTOR" = "github-actions[bot]" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⏭Triggered by bot commit — skipping generation"
           else
             echo "skip=false" >> $GITHUB_OUTPUT
-            echo "Triggered by human — proceeding"
           fi
 
       - name: Checkout PR branch
@@ -68,27 +62,119 @@ jobs:
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: python scripts/generate_dbt_models.py
 
-      - name: Check generated files
+      - name: Commit via GitHub API (produces verified commits)
         if: steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          echo "Generated files:"
-          find dbt/models -name "*.sql" -o -name "*.yml" | sort
+          # Collect all generated files
+          FILES=$(find dbt/models -name "*.sql" -o -name "*.yml" 2>/dev/null)
 
-      - name: Commit generated dbt files
-        if: steps.guard.outputs.skip != 'true'
-        run: |
-          git config user.name  "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          if [ -z "$FILES" ]; then
+            echo "No generated files found"
+            exit 0
+          fi
+
+          # Check if there's anything new to commit
           git add dbt/models/
           if git diff --staged --quiet; then
-            echo "No changes to commit — models already up to date"
-          else
-            git commit -m "chore: auto-generate dbt models from mapping sheet [skip ci]"
-            git push origin ${{ github.head_ref }}
-            echo "Committed and pushed generated dbt files"
+            echo "No changes to commit"
+            exit 0
           fi
+
+          echo "Files to commit:"
+          git diff --staged --name-only
+
+          # Use GitHub CLI to commit via API — always produces Verified commits
+          # gh api handles base64 encoding and tree/blob creation automatically
+          BRANCH="${{ github.head_ref }}"
+          REPO="${{ github.repository }}"
+
+          # Get current commit SHA
+          HEAD_SHA=$(git rev-parse HEAD)
+
+          # Build the file list for the API
+          python3 << 'PYEOF'
+          import os, base64, subprocess, json
+
+          token   = os.environ["GH_TOKEN"]
+          repo    = os.environ["REPO"]
+          branch  = os.environ["BRANCH"]
+          head_sha = os.environ["HEAD_SHA"]
+
+          import urllib.request
+
+          def gh(method, path, body=None):
+              url = f"https://api.github.com{path}"
+              req = urllib.request.Request(
+                  url,
+                  data=json.dumps(body).encode() if body else None,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  }
+              )
+              with urllib.request.urlopen(req) as r:
+                  return json.loads(r.read())
+
+          # Get list of staged files
+          result = subprocess.run(
+              ["git", "diff", "--staged", "--name-only"],
+              capture_output=True, text=True
+          )
+          staged = [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
+          print(f"Committing {len(staged)} file(s) via GitHub API")
+
+          # Build blobs for each file
+          blobs = []
+          for filepath in staged:
+              if not os.path.exists(filepath):
+                  continue
+              with open(filepath, "rb") as f:
+                  content = base64.b64encode(f.read()).decode()
+              blob = gh("POST", f"/repos/{repo}/git/blobs", {
+                  "content": content,
+                  "encoding": "base64"
+              })
+              blobs.append({"path": filepath, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+
+          if not blobs:
+              print("Nothing to commit")
+              exit(0)
+
+          # Get current tree
+          commit = gh("GET", f"/repos/{repo}/git/commits/{head_sha}")
+          base_tree = commit["tree"]["sha"]
+
+          # Create new tree
+          tree = gh("POST", f"/repos/{repo}/git/trees", {
+              "base_tree": base_tree,
+              "tree": blobs
+          })
+
+          # Create commit (GitHub API commits are always Verified)
+          new_commit = gh("POST", f"/repos/{repo}/git/commits", {
+              "message": "chore: auto-generate dbt models from mapping sheet [skip ci]",
+              "tree": tree["sha"],
+              "parents": [head_sha]
+          })
+
+          # Update branch ref
+          gh("PATCH", f"/repos/{repo}/git/refs/heads/{branch}", {
+              "sha": new_commit["sha"],
+              "force": False
+          })
+
+          print(f"Verified commit created: {new_commit['sha']}")
+          PYEOF
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
       - name: Done
         run: echo "Workflow complete"
-        # This step always runs, ensuring the job always reports a conclusion
-
