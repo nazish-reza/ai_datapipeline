@@ -1,20 +1,21 @@
+```yaml
 version: 2
-
 models:
   - name: dim_users
-    description: "Dimension table containing user information including identifiers and demographic data"
+    description: "Dimension table for users with demographic information"
     columns:
       - name: user_id
-        description: "Primary key identifier for users"
+        description: "Primary key for users"
         data_tests:
           - not_null
           - unique
       - name: location_raw
-        description: "Raw location string with leading/trailing whitespace removed"
+        description: "Raw location data from source"
       - name: age
-        description: "Numeric age of the user"
+        description: "User's age as integer"
       - name: age_group
-        description: "Categorical age group derived from the user's age"
+        description: "Derived age group categorization"
         data_tests:
           - accepted_values:
               values: ['Under 18', '18-25', '26-40', '40+', 'Unknown']
+```

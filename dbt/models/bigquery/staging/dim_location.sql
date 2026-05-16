@@ -1,22 +1,25 @@
-/*
-  model: dim_location
-  description: Dimension table for location data extracted from users table
-  sources:
-    - raw.users
-*/
+-- model: dim_location
+-- description: Staging dimension table for locations with surrogate key and parsed city, state, country from raw users data
+-- sources: {{ source('raw', 'users') }}
 
-with source_data as (
-  select distinct Location
-  from {{ source('raw', 'users') }}
+WITH raw_users AS (
+    SELECT
+        Location
+    FROM {{ source('raw', 'users') }}
 ),
 
-transformed as (
-  select
-    dense_rank() over(order by Location) as location_id,
-    split(Location, ',')[SAFE_OFFSET(0)] as city,
-    split(Location, ',')[SAFE_OFFSET(1)] as state,
-    split(Location, ',')[SAFE_OFFSET(2)] as country
-  from source_data
+transformed AS (
+    SELECT
+        dense_rank() over(order by Location) AS location_id,
+        split(Location, ',')[SAFE_OFFSET(0)] AS city,
+        split(Location, ',')[SAFE_OFFSET(1)] AS state,
+        split(Location, ',')[SAFE_OFFSET(2)] AS country
+    FROM raw_users
 )
 
-select * from transformed
+SELECT
+    location_id,
+    city,
+    state,
+    country
+FROM transformed

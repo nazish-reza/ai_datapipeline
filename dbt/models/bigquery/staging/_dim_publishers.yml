@@ -3,7 +3,7 @@ version: 2
 
 models:
   - name: dim_publishers
-    description: "Dimension table containing publisher information."
+    description: "Dimension table for book publishers."
     columns:
       - name: publisher_id
         description: "Surrogate key for publishers"
@@ -11,7 +11,7 @@ models:
           - not_null
           - unique
       - name: publisher_name
-        description: "Distinct trimmed publisher name"
+        description: "Name of the publisher"
         data_tests:
           - not_null
 ```

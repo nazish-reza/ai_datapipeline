@@ -1,34 +1,35 @@
 -- model: fact_book_ratings
--- description: Fact table containing book ratings with derived categories and timestamps
+-- description: Fact table for book ratings including rating category and timestamp
 -- sources: {{ source('raw', 'ratings') }}
 
-WITH raw_ratings AS (
-    SELECT
+with source_ratings as (
+    select
         `User-ID`,
         ISBN,
         `Book-Rating`
-    FROM {{ source('raw', 'ratings') }}
+    from {{ source('raw', 'ratings') }}
 ),
 
-transformed_ratings AS (
-    SELECT
+transformed as (
+    select
+        row_number() over() as rating_id,
         cast(`User-ID` as int) as user_id,
         cast(ISBN as string) as book_id,
         `Book-Rating` as rating,
-        CASE
-            WHEN `Book-Rating` >= 8 THEN 'High'
-            WHEN `Book-Rating` BETWEEN 5 AND 7 THEN 'Medium'
-            ELSE 'Low'
-        END as rating_category,
+        case
+            when `Book-Rating` >= 8 then 'High'
+            when `Book-Rating` between 5 and 7 then 'Medium'
+            else 'Low'
+        end as rating_category,
         current_timestamp() as rating_date
-    FROM raw_ratings
+    from source_ratings
 )
 
-SELECT
-    row_number() over() as rating_id,
+select
+    rating_id,
     user_id,
     book_id,
     rating,
     rating_category,
     rating_date
-FROM transformed_ratings
+from transformed

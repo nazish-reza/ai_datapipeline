@@ -1,24 +1,28 @@
--- dim_authors: staging dimension table for authors
--- source: {{ source('raw', 'books') }}
+-- model: dim_authors
+-- description: Dimension table for authors
+-- sources: {{ source('raw', 'books') }}
 
-WITH source_books AS (
+WITH raw_books AS (
     SELECT
         `Book-Author`
     FROM {{ source('raw', 'books') }}
 ),
 
-transformations AS (
+clean_authors AS (
     SELECT
-        dense_rank() OVER (ORDER BY trimmed_author) AS author_id,
-        trimmed_author AS author_name
-    FROM (
-        SELECT DISTINCT
-            trim(`Book-Author`) AS trimmed_author
-        FROM source_books
-    )
+        DISTINCT TRIM(`Book-Author`) AS author_name
+    FROM raw_books
+    WHERE TRIM(`Book-Author`) IS NOT NULL
+),
+
+final AS (
+    SELECT
+        DENSE_RANK() OVER (ORDER BY author_name) AS author_id,
+        author_name
+    FROM clean_authors
 )
 
 SELECT
     author_id,
     author_name
-FROM transformations
+FROM final
