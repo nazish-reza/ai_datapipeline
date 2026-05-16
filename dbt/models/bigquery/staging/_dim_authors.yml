@@ -3,14 +3,15 @@ version: 2
 
 models:
   - name: dim_authors
-    description: "Dimension table containing unique authors derived from the books table."
+    description: Dimension table containing unique author information with surrogate keys.
     columns:
       - name: author_id
-        description: "Surrogate key generated via dense_rank over cleaned author names"
+        description: Surrogate key for authors, generated using dense_rank over ordered trimmed author names.
         data_tests:
           - not_null
           - unique
       - name: author_name
-        description: "Cleaned and deduplicated author name from Book-Author column"
-        data_tests: []
+        description: Name of the author, derived from distinct trimmed Book-Author values from the source.
+        data_tests:
+          - not_null
 ```
