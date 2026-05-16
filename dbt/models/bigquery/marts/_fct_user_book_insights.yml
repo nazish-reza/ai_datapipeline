@@ -2,40 +2,40 @@ version: 2
 
 models:
   - name: fct_user_book_insights
-    description: "Fact table containing user-book insights with ratings, age groups, and other derived metrics"
+    description: "Fact table containing insights about user-book interactions including ratings, averages, and derived metrics"
     columns:
       - name: insight_id
-        description: "Primary key, unique identifier for each insight record"
+        description: "Primary key for the fact table, generated as a row number"
         data_tests:
           - not_null
           - unique
       - name: user_id
-        description: "Foreign key to users table"
+        description: "Foreign key referencing the users table (User-ID)"
         data_tests:
           - not_null
       - name: book_id
-        description: "Foreign key to books table"
+        description: "Foreign key referencing the books table (ISBN)"
         data_tests:
           - not_null
       - name: author_name
-        description: "Name of the book author"
+        description: "Name of the book's author"
       - name: publisher_name
-        description: "Name of the book publisher"
+        description: "Name of the book's publisher"
       - name: user_age_group
-        description: "Age group of the user derived from their age"
+        description: "Age group category of the user"
         data_tests:
           - accepted_values:
               values: ["Under 18", "18-25", "26-40", "40+", "Unknown"]
       - name: avg_user_rating
-        description: "Average rating given by the user across all their ratings"
+        description: "Average rating given by the user across all their rated books"
       - name: avg_book_rating
         description: "Average rating for the book across all users"
       - name: rating_deviation
-        description: "Difference between user's rating and the book's average rating"
+        description: "Difference between the user's rating and the book's average rating"
       - name: user_location_country
-        description: "Country extracted from user's location string"
+        description: "Country extracted from the user's location string"
       - name: high_rating_flag
-        description: "Flag indicating if the rating is high (>= 8)"
+        description: "Binary flag indicating if the rating is high (1 for >=8, 0 otherwise)"
         data_tests:
           - accepted_values:
               values: [0, 1]

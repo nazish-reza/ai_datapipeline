@@ -1,17 +1,18 @@
 -- model: fact_book_ratings
--- description: Fact table containing book ratings with derived categories
--- sources: {{ source('raw', 'ratings') }}
+-- description: Fact table containing book ratings with derived categories and timestamps
+-- sources:
+--   - raw.ratings
 
-with source_data as (
-    select
+WITH raw_ratings AS (
+    SELECT
         `User-ID`,
         ISBN,
         `Book-Rating`
-    from {{ source('raw', 'ratings') }}
+    FROM {{ source('raw', 'ratings') }}
 ),
 
-transformed as (
-    select
+transformed_ratings AS (
+    SELECT
         row_number() over() as rating_id,
         cast(`User-ID` as int) as user_id,
         cast(ISBN as string) as book_id,
@@ -22,14 +23,7 @@ transformed as (
             else 'Low'
         end as rating_category,
         current_timestamp() as rating_date
-    from source_data
+    FROM raw_ratings
 )
 
-select
-    rating_id,
-    user_id,
-    book_id,
-    rating,
-    rating_category,
-    rating_date
-from transformed
+SELECT * FROM transformed_ratings

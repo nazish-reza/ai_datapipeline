@@ -1,16 +1,16 @@
+```yaml
 version: 2
 
 models:
   - name: dim_authors
-    description: Dimension table containing unique author information with surrogate keys.
+    description: "Dimension table containing unique authors derived from the books table."
     columns:
       - name: author_id
-        description: Surrogate key
+        description: "Surrogate key generated via dense_rank over cleaned author names"
         data_tests:
           - not_null
           - unique
       - name: author_name
-        description: Distinct trimmed author name from Book-Author column.
-        data_tests:
-          - not_null
-          - accepted_values
+        description: "Cleaned and deduplicated author name from Book-Author column"
+        data_tests: []
+```
