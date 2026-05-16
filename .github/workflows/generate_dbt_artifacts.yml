@@ -66,16 +66,10 @@ jobs:
         if: steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Collect all generated files
-          FILES=$(find dbt/models -name "*.sql" -o -name "*.yml" 2>/dev/null)
-
-          if [ -z "$FILES" ]; then
-            echo "No generated files found"
-            exit 0
-          fi
-
-          # Check if there's anything new to commit
           git add dbt/models/
           if git diff --staged --quiet; then
             echo "No changes to commit"
@@ -85,24 +79,13 @@ jobs:
           echo "Files to commit:"
           git diff --staged --name-only
 
-          # Use GitHub CLI to commit via API — always produces Verified commits
-          # gh api handles base64 encoding and tree/blob creation automatically
-          BRANCH="${{ github.head_ref }}"
-          REPO="${{ github.repository }}"
-
-          # Get current commit SHA
-          HEAD_SHA=$(git rev-parse HEAD)
-
-          # Build the file list for the API
           python3 << 'PYEOF'
-          import os, base64, subprocess, json
+          import os, base64, subprocess, json, urllib.request
 
-          token   = os.environ["GH_TOKEN"]
-          repo    = os.environ["REPO"]
-          branch  = os.environ["BRANCH"]
+          token    = os.environ["GH_TOKEN"]
+          repo     = os.environ["REPO"]
+          branch   = os.environ["BRANCH"]
           head_sha = os.environ["HEAD_SHA"]
-
-          import urllib.request
 
           def gh(method, path, body=None):
               url = f"https://api.github.com{path}"
@@ -120,7 +103,7 @@ jobs:
               with urllib.request.urlopen(req) as r:
                   return json.loads(r.read())
 
-          # Get list of staged files
+          # Get staged files
           result = subprocess.run(
               ["git", "diff", "--staged", "--name-only"],
               capture_output=True, text=True
@@ -128,7 +111,7 @@ jobs:
           staged = [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
           print(f"Committing {len(staged)} file(s) via GitHub API")
 
-          # Build blobs for each file
+          # Create blobs
           blobs = []
           for filepath in staged:
               if not os.path.exists(filepath):
@@ -139,14 +122,19 @@ jobs:
                   "content": content,
                   "encoding": "base64"
               })
-              blobs.append({"path": filepath, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+              blobs.append({
+                  "path": filepath,
+                  "mode": "100644",
+                  "type": "blob",
+                  "sha": blob["sha"]
+              })
 
           if not blobs:
               print("Nothing to commit")
               exit(0)
 
-          # Get current tree
-          commit = gh("GET", f"/repos/{repo}/git/commits/{head_sha}")
+          # Get base tree
+          commit    = gh("GET", f"/repos/{repo}/git/commits/{head_sha}")
           base_tree = commit["tree"]["sha"]
 
           # Create new tree
@@ -155,7 +143,7 @@ jobs:
               "tree": blobs
           })
 
-          # Create commit (GitHub API commits are always Verified)
+          # Create verified commit via API
           new_commit = gh("POST", f"/repos/{repo}/git/commits", {
               "message": "chore: auto-generate dbt models from mapping sheet [skip ci]",
               "tree": tree["sha"],
@@ -170,11 +158,6 @@ jobs:
 
           print(f"Verified commit created: {new_commit['sha']}")
           PYEOF
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO: ${{ github.repository }}
-          BRANCH: ${{ github.head_ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
 
       - name: Done
         run: echo "Workflow complete"
