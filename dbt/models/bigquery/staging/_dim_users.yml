@@ -1,24 +1,20 @@
 version: 2
+
 models:
   - name: dim_users
-    description: "Dimension table for users, containing user information and derived attributes"
+    description: "Dimension table containing user information including identifiers and demographic data"
     columns:
       - name: user_id
-        description: "Primary key"
+        description: "Primary key identifier for users"
         data_tests:
           - not_null
           - unique
       - name: location_raw
-        description: "User location"
+        description: "Raw location string with leading/trailing whitespace removed"
       - name: age
-        description: "User age"
+        description: "Numeric age of the user"
       - name: age_group
-        description: "Derived column"
+        description: "Categorical age group derived from the user's age"
         data_tests:
           - accepted_values:
-              values:
-                - 'Under 18'
-                - '18-25'
-                - '26-40'
-                - '40+'
-                - 'Unknown'
+              values: ['Under 18', '18-25', '26-40', '40+', 'Unknown']

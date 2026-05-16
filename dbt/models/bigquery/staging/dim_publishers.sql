@@ -1,24 +1,24 @@
 /*
-model: dim_publishers
-description: Dimension table for publishers with surrogate keys
-sources:
-  - {{ source('raw', 'books') }}
+  Model: dim_publishers
+  Description: Dimension table for publishers
+
+  Sources:
+    - {{ source('raw', 'books') }}
 */
-WITH
-source_books AS (
-    SELECT
-        trim(Publisher) AS publisher_name
-    FROM {{ source('raw', 'books') }}
+
+with raw_books as (
+    select
+        "Publisher"
+    from {{ source('raw', 'books') }}
 ),
 
-transformations AS (
-    SELECT DISTINCT
-        publisher_name,
-        dense_rank() over (order by publisher_name) AS publisher_id
-    FROM source_books
+distinct_publishers as (
+    select
+        distinct trim("Publisher") as publisher_name
+    from raw_books
 )
 
-SELECT
-    publisher_id,
+select
+    dense_rank() over(order by publisher_name) as publisher_id,
     publisher_name
-FROM transformations
+from distinct_publishers

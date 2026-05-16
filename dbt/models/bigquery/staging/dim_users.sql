@@ -1,34 +1,33 @@
 -- model: dim_users
--- description: Dimension table for users with cleaned and transformed fields
+-- description: Staging dimension table for users
 -- sources: {{ source('raw', 'users') }}
--- refs: none
 
-WITH source_data AS (
-    SELECT
+with source_data as (
+    select
         `User-ID`,
         `Location`,
         `Age`
-    FROM {{ source('raw', 'users') }}
+    from {{ source('raw', 'users') }}
 ),
 
-transformed_data AS (
-    SELECT
-        CAST(`User-ID` AS INT) AS user_id,
-        TRIM(`Location`) AS location_raw,
-        CAST(`Age` AS INT) AS age,
-        CASE
-            WHEN `Age` < 18 THEN 'Under 18'
-            WHEN `Age` BETWEEN 18 AND 25 THEN '18-25'
-            WHEN `Age` BETWEEN 26 AND 40 THEN '26-40'
-            WHEN `Age` > 40 THEN '40+'
-            ELSE 'Unknown'
-        END AS age_group
-    FROM source_data
+transformed_data as (
+    select
+        cast(`User-ID` as int) as user_id,
+        trim(`Location`) as location_raw,
+        cast(`Age` as int) as age,
+        case
+            when `Age` < 18 then 'Under 18'
+            when `Age` between 18 and 25 then '18-25'
+            when `Age` between 26 and 40 then '26-40'
+            when `Age` > 40 then '40+'
+            else 'Unknown'
+        end as age_group
+    from source_data
 )
 
-SELECT
+select
     user_id,
     location_raw,
     age,
     age_group
-FROM transformed_data
+from transformed_data

@@ -2,26 +2,26 @@ version: 2
 
 models:
   - name: fact_book_ratings
-    description: Fact table containing book ratings with categorized rating levels
+    description: Fact table containing book ratings with derived categories and timestamps
     columns:
       - name: rating_id
-        description: Primary key for the rating record
-        data_tests:
+        description: Primary key
+        tests:
           - not_null
           - unique
       - name: user_id
         description: Foreign key to users
-        data_tests:
+        tests:
           - not_null
       - name: book_id
         description: Foreign key to books
-        data_tests:
+        tests:
           - not_null
       - name: rating
-        description: Book rating value
+        description: Numerical book rating
       - name: rating_category
         description: Derived rating category
-        data_tests:
+        tests:
           - accepted_values:
               values: ['High', 'Medium', 'Low']
       - name: rating_date

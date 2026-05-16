@@ -3,20 +3,20 @@ version: 2
 
 models:
   - name: dim_location
-    description: Dimension table for locations, with city, state, and country information extracted from user locations.
+    description: "Dimension table for location data, derived from the users table's Location column."
     columns:
       - name: location_id
-        description: Surrogate key for the location dimension.
+        description: "Surrogate key for location dimension, generated using dense_rank over Location."
         data_tests:
           - not_null
           - unique
       - name: city
-        description: City part extracted from the location string.
+        description: "City extracted from the Location string (first part of comma-separated values)."
         data_tests: []
       - name: state
-        description: State part extracted from the location string.
+        description: "State extracted from the Location string (second part of comma-separated values)."
         data_tests: []
       - name: country
-        description: Country part extracted from the location string.
+        description: "Country extracted from the Location string (third part of comma-separated values)."
         data_tests: []
 ```

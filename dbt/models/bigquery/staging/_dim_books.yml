@@ -1,8 +1,9 @@
+```yaml
 version: 2
 
 models:
   - name: dim_books
-    description: "Dimension table containing book information"
+    description: "Dimension table containing book information including title, author, publication year, publisher, and image URLs."
     columns:
       - name: book_id
         description: "Primary key"
@@ -13,20 +14,21 @@ models:
         description: "Book title with cleaned spaces"
         data_tests: []
       - name: author_name
-        description: "Author name normalized with proper capitalization"
+        description: "Normalized author name"
         data_tests: []
       - name: publication_year
-        description: "Year of publication with invalid years (0) set to null"
+        description: "Publication year with invalid years (0) set to null"
         data_tests: []
       - name: publisher_name
-        description: "Publisher name with trimmed spaces"
+        description: "Publisher name"
         data_tests: []
       - name: image_small
-        description: "URL for small book image"
+        description: "Small image URL"
         data_tests: []
       - name: image_medium
-        description: "URL for medium book image"
+        description: "Medium image URL"
         data_tests: []
       - name: image_large
-        description: "URL for large book image"
+        description: "Large image URL"
         data_tests: []
+```
