@@ -14,28 +14,45 @@ jobs:
   generate-dbt-models:
     name: Generate dbt SQL & YML
     runs-on: ubuntu-latest
-
-    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+    # NO job-level if condition — job must always run so the required
+    #    check always reports back. A skipped job leaves the check as
+    #    "pending" forever, blocking the merge.
 
     steps:
+      - name: Check if bot commit (skip re-runs)
+        id: guard
+        run: |
+          # On pull_request events, head_commit is accessed differently
+          ACTOR="${{ github.actor }}"
+          echo "Triggered by: $ACTOR"
+          if [ "$ACTOR" = "github-actions[bot]" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+            echo "⏭Triggered by bot commit — skipping generation"
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+            echo "Triggered by human — proceeding"
+          fi
+
       - name: Checkout PR branch
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/checkout@v4
         with:
           ref: ${{ github.head_ref }}
           fetch-depth: 0
-          # Use the default GITHUB_TOKEN so commits are attributed to the
-          # verified github-actions bot identity
           token: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
       - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
         run: pip install -r scripts/requirements.txt
 
       - name: Detect changed mapping files
+        if: steps.guard.outputs.skip != 'true'
         id: changed
         run: |
           git diff --name-only origin/${{ github.base_ref }}...HEAD -- mapping/ > changed_mappings.txt
@@ -44,25 +61,24 @@ jobs:
           echo "files=$(cat changed_mappings.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
 
       - name: Generate dbt models
+        if: steps.guard.outputs.skip != 'true'
         env:
           API_KEY: ${{ secrets.API_KEY }}
           INVOKE_URL: ${{ secrets.INVOKE_URL }}
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
-        run: |
-          python scripts/generate_dbt_models.py
+        run: python scripts/generate_dbt_models.py
 
       - name: Check generated files
+        if: steps.guard.outputs.skip != 'true'
         run: |
           echo "Generated files:"
           find dbt/models -name "*.sql" -o -name "*.yml" | sort
 
       - name: Commit generated dbt files
+        if: steps.guard.outputs.skip != 'true'
         run: |
-          # Use the verified github-actions bot email
-          # This exact email is GitHub's official bot identity → commits show as "Verified"
           git config user.name  "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-
           git add dbt/models/
           if git diff --staged --quiet; then
             echo "No changes to commit — models already up to date"
@@ -71,3 +87,8 @@ jobs:
             git push origin ${{ github.head_ref }}
             echo "Committed and pushed generated dbt files"
           fi
+
+      - name: Done
+        run: echo "Workflow complete"
+        # This step always runs, ensuring the job always reports a conclusion
+
