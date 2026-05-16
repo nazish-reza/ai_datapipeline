@@ -2,29 +2,31 @@ version: 2
 
 models:
   - name: dim_books
-    description: Dimension table for books with metadata and images
+    description: "Dimension table containing book information"
     columns:
       - name: book_id
-        description: Primary key
-        data_tests: [not_null, unique]
+        description: "Primary key"
+        data_tests:
+          - not_null
+          - unique
       - name: title
-        description: Clean spaces
+        description: "Book title with cleaned spaces"
         data_tests: []
       - name: author_name
-        description: Normalize
+        description: "Author name normalized with proper capitalization"
         data_tests: []
       - name: publication_year
-        description: Remove invalid year
+        description: "Year of publication with invalid years (0) set to null"
         data_tests: []
       - name: publisher_name
-        description: Publisher name
+        description: "Publisher name with trimmed spaces"
         data_tests: []
       - name: image_small
-        description: Small image URL
+        description: "URL for small book image"
         data_tests: []
       - name: image_medium
-        description: Medium image URL
+        description: "URL for medium book image"
         data_tests: []
       - name: image_large
-        description: Large image URL
+        description: "URL for large book image"
         data_tests: []

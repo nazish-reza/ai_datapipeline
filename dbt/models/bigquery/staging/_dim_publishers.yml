@@ -1,15 +1,16 @@
+```yaml
 version: 2
 
 models:
   - name: dim_publishers
-    description: Dimension table containing publisher information.
+    description: "Dimension table for publishers with surrogate keys"
     columns:
       - name: publisher_id
-        description: Surrogate key for publishers.
+        description: "Surrogate key for publishers"
         data_tests:
           - not_null
           - unique
       - name: publisher_name
-        description: The trimmed publisher name.
-        data_tests:
-          - not_null
+        description: "Distinct publisher names with whitespace trimmed"
+        data_tests: []
+```

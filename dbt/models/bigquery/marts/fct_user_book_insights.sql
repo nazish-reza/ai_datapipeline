@@ -1,79 +1,53 @@
-/*
-Model: fct_user_book_insights
-Description: Fact table containing user-book insights including ratings, age groups, and derived metrics
-Sources:
-  - {{ source('raw', 'ratings') }}
-Refs:
-  - {{ ref('dim_users') }}
-  - {{ ref('dim_books') }}
-*/
+-- Model: fct_user_book_insights
+-- Description: Fact table capturing user-book interactions with derived insights such as age groups, average ratings, and rating deviations.
+-- Sources: {{ source('raw', 'ratings') }}
+-- Refs: {{ ref('dim_users') }}, {{ ref('dim_books') }}
 
-with
-
-ratings as (
-    select
-        "User-ID" as raw_user_id,
-        "ISBN" as raw_book_id,
-        "Book-Rating" as book_rating
-    from {{ source('raw', 'ratings') }}
+WITH
+ratings AS (
+    SELECT
+        `User-ID` AS user_id,
+        ISBN AS book_id,
+        `Book-Rating` AS book_rating
+    FROM {{ source('raw', 'ratings') }}
 ),
 
-users as (
-    select
-        user_id,
-        age,
-        location
-    from {{ ref('dim_users') }}
+users AS (
+    SELECT * FROM {{ ref('dim_users') }}
 ),
 
-books as (
-    select
-        book_id,
-        author_name,
-        publisher_name
-    from {{ ref('dim_books') }}
+books AS (
+    SELECT * FROM {{ ref('dim_books') }}
 ),
 
-joined as (
-    select
-        r.book_rating,
+transformed AS (
+    SELECT
         u.user_id,
-        u.age,
-        u.location,
         b.book_id,
         b.author_name,
-        b.publisher_name
-    from ratings r
-    join users u on r.raw_user_id = u.user_id
-    join books b on r.raw_book_id = b.book_id
-),
-
-with_window as (
-    select
-        *,
-        avg(book_rating) over (partition by user_id) as avg_user_rating,
-        avg(book_rating) over (partition by book_id) as avg_book_rating
-    from joined
-),
-
-transformed as (
-    select
-        *,
-        case
-            when age < 18 then 'Under 18'
-            when age between 18 and 25 then '18-25'
-            when age between 26 and 40 then '26-40'
-            when age > 40 then '40+'
-            else 'Unknown'
-        end as user_age_group,
-        split(location, ',')[SAFE_OFFSET(2)] as user_location_country,
-        case when book_rating >= 8 then 1 else 0 end as high_rating_flag,
-        book_rating - avg_book_rating as rating_deviation
-    from with_window
+        b.publisher_name,
+        r.book_rating,
+        u.age,
+        u.location,
+        CASE
+            WHEN u.age < 18 THEN 'Under 18'
+            WHEN u.age BETWEEN 18 AND 25 THEN '18-25'
+            WHEN u.age BETWEEN 26 AND 40 THEN '26-40'
+            WHEN u.age > 40 THEN '40+'
+            ELSE 'Unknown'
+        END AS user_age_group,
+        SPLIT(u.location, ',')[SAFE_OFFSET(2)] AS user_location_country,
+        CASE WHEN r.book_rating >= 8 THEN 1 ELSE 0 END AS high_rating_flag,
+        AVG(r.book_rating) OVER (PARTITION BY u.user_id) AS avg_user_rating,
+        AVG(r.book_rating) OVER (PARTITION BY b.book_id) AS avg_book_rating,
+        r.book_rating - AVG(r.book_rating) OVER (PARTITION BY b.book_id) AS rating_deviation
+    FROM ratings r
+    JOIN users u ON r.user_id = u.user_id
+    JOIN books b ON r.book_id = b.book_id
 )
 
-select
-    row_number() over () as insight_id,
+SELECT
+    ROW_NUMBER() OVER () AS insight_id,
     user_id,
     book_id,
     author_name,
@@ -84,4 +58,4 @@ select
     rating_deviation,
     user_location_country,
     high_rating_flag
-from transformed
+FROM transformed

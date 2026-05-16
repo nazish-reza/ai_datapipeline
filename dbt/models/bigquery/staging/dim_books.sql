@@ -1,15 +1,13 @@
-/*
-  Model: dim_books
-  Description: Staging dimension table for books
-  Sources:
-    - {{ source('raw', 'books') }}
-*/
+-- model: dim_books
+-- description: Staging dimension table for books
+-- sources: {{ source('raw', 'books') }}
+-- refs: none
 
-WITH source_books AS (
+WITH raw_books AS (
     SELECT * FROM {{ source('raw', 'books') }}
 ),
 
-transformed AS (
+transformed_books AS (
     SELECT
         cast(ISBN as string) as book_id,
         trim(`Book-Title`) as title,
@@ -19,7 +17,7 @@ transformed AS (
         `Image-URL-S` as image_small,
         `Image-URL-M` as image_medium,
         `Image-URL-L` as image_large
-    FROM source_books
+    FROM raw_books
 )
 
-SELECT * FROM transformed
+SELECT * FROM transformed_books
