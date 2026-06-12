@@ -1,0 +1,31 @@
+version: 2
+models:
+  - name: fact_book_ratings
+    description: Fact table of book ratings at the rating grain, capturing user, book, rating value, and category
+    columns:
+      - name: rating_id
+        description: Primary key for the fact table, generated as a unique row identifier
+        data_tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: Foreign key to users table, cleaned from raw User-ID field
+        data_tests:
+          - not_null
+      - name: book_id
+        description: Foreign key to books table, cleaned from raw ISBN field
+        data_tests:
+          - not_null
+      - name: rating
+        description: Numeric rating value from the raw Book-Rating field
+        data_tests:
+          - not_null
+      - name: rating_category
+        description: Categorization of ratings into High (8+), Medium (5-7), or Low (below 5)
+        data_tests:
+          - accepted_values:
+              values: ['High', 'Medium', 'Low']
+      - name: rating_date
+        description: Timestamp when the rating was recorded, set to current timestamp
+        data_tests:
+          - not_null

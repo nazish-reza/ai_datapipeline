@@ -1,0 +1,156 @@
+{
+  "entities": {
+    "dim_authors": {
+      "file": "dbt/models/bigquery/staging/dim_authors.sql",
+      "last_generated": "2026-06-12T19:45:36.612750Z",
+      "layer": "staging",
+      "mapping_file": "mapping/data_model_mapping_final.xlsx",
+      "mapping_hash": "4292df5f16b95943",
+      "output_columns": [
+        "author_id",
+        "author_name"
+      ],
+      "refs": [],
+      "sources": [
+        "books"
+      ]
+    },
+    "dim_books": {
+      "file": "dbt/models/bigquery/staging/dim_books.sql",
+      "last_generated": "2026-06-12T19:50:21.919656Z",
+      "layer": "staging",
+      "mapping_file": "mapping/data_model_mapping_final.xlsx",
+      "mapping_hash": "623595aa3084c667",
+      "output_columns": [
+        "book_id",
+        "title",
+        "author_name",
+        "publication_year",
+        "publisher_name",
+        "image_small",
+        "image_medium",
+        "image_large"
+      ],
+      "refs": [],
+      "sources": [
+        "books"
+      ]
+    },
+    "dim_location": {
+      "file": "dbt/models/bigquery/staging/dim_location.sql",
+      "last_generated": "2026-06-12T20:00:21.845891Z",
+      "layer": "staging",
+      "mapping_file": "mapping/data_model_mapping_final.xlsx",
+      "mapping_hash": "fc03eb43d2c0b568",
+      "output_columns": [
+        "location_id",
+        "city",
+        "state",
+        "country"
+      ],
+      "refs": [],
+      "sources": [
+        "users"
+      ]
+    },
+    "dim_publishers": {
+      "file": "dbt/models/bigquery/staging/dim_publishers.sql",
+      "last_generated": "2026-06-12T20:11:36.774696Z",
+      "layer": "staging",
+      "mapping_file": "mapping/data_model_mapping_final.xlsx",
+      "mapping_hash": "4220f1bd48b74fed",
+      "output_columns": [
+        "publisher_id",
+        "publisher_name"
+      ],
+      "refs": [],
+      "sources": [
+        "books"
+      ]
+    },
+    "dim_users": {
+      "file": "dbt/models/bigquery/staging/dim_users.sql",
+      "last_generated": "2026-06-12T20:27:40.225676Z",
+      "layer": "staging",
+      "mapping_file": "mapping/data_model_mapping_final.xlsx",
+      "mapping_hash": "bf82be9ea84b44c2",
+      "output_columns": [
+        "user_id",
+        "location_raw",
+        "age",
+        "age_group"
+      ],
+      "refs": [],
+      "sources": [
+        "users"
+      ]
+    },
+    "fact_book_ratings": {
+      "file": "dbt/models/bigquery/staging/fact_book_ratings.sql",
+      "last_generated": "2026-06-12T20:34:08.624194Z",
+      "layer": "staging",
+      "mapping_file": "mapping/data_model_mapping_final.xlsx",
+      "mapping_hash": "751fb367c855c700",
+      "output_columns": [
+        "rating_id",
+        "user_id",
+        "book_id",
+        "rating",
+        "rating_category",
+        "rating_date"
+      ],
+      "refs": [],
+      "sources": [
+        "ratings"
+      ]
+    },
+    "fct_user_book_insights": {
+      "file": "dbt/models/bigquery/staging/fct_user_book_insights.sql",
+      "last_generated": "2026-06-12T20:45:59.814319Z",
+      "layer": "staging",
+      "mapping_file": "mapping/data_model_mapping_final.xlsx",
+      "mapping_hash": "f905ffa9e90b5ee1",
+      "output_columns": [
+        "insight_id",
+        "user_id",
+        "book_id",
+        "author_name",
+        "publisher_name",
+        "user_age_group",
+        "avg_user_rating",
+        "avg_book_rating",
+        "rating_deviation",
+        "user_location_country",
+        "high_rating_flag"
+      ],
+      "refs": [],
+      "sources": [
+        "books",
+        "ratings",
+        "users"
+      ]
+    }
+  },
+  "raw_tables": {
+    "books": [
+      "Book-Author",
+      "Book-Title",
+      "ISBN",
+      "Image-URL-L",
+      "Image-URL-M",
+      "Image-URL-S",
+      "Publisher",
+      "Year-Of-Publication"
+    ],
+    "ratings": [
+      "Book-Rating",
+      "ISBN",
+      "User-ID"
+    ],
+    "users": [
+      "Age",
+      "Location",
+      "User-ID"
+    ]
+  }
+}

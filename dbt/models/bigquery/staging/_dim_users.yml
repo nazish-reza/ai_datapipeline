@@ -1,0 +1,19 @@
+version: 2
+models:
+  - name: dim_users
+    description: Dimension table with one row per user containing user attributes
+    columns:
+      - name: user_id
+        description: Unique identifier for each user, sourced from raw User-ID field and cast to integer
+        data_tests:
+          - not_null
+          - unique
+      - name: location_raw
+        description: Raw location string from users table with whitespace trimmed
+      - name: age
+        description: User's age in years, sourced from raw Age field and cast to integer
+      - name: age_group
+        description: Categorical age group derived from age field
+        data_tests:
+          - accepted_values:
+              values: ['Under 18', '18-25', '26-40', '40+', 'Unknown']

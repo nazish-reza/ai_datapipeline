@@ -1,0 +1,25 @@
+version: 2
+
+models:
+  - name: dim_books
+    description: Dimension table with one row per book containing book details
+    columns:
+      - name: book_id
+        description: Unique identifier for a book, derived from ISBN
+        data_tests:
+          - not_null
+          - unique
+      - name: title
+        description: Title of the book, cleaned from Book-Title
+      - name: author_name
+        description: Author of the book, normalized from Book-Author
+      - name: publication_year
+        description: Year of publication with invalid year 0 set to null, from Year-Of-Publication
+      - name: publisher_name
+        description: Publisher of the book, cleaned from Publisher
+      - name: image_small
+        description: URL for the small book cover image from Image-URL-S
+      - name: image_medium
+        description: URL for the medium book cover image from Image-URL-M
+      - name: image_large
+        description: URL for the large book cover image from Image-URL-L
