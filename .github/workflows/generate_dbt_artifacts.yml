@@ -70,7 +70,7 @@ jobs:
           BRANCH: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git add dbt/models/
+          git add dbt/   # models + registry.json (memory) committed together
           if git diff --staged --quiet; then
             echo "No changes to commit"
             exit 0

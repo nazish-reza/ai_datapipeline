@@ -1,18 +1,30 @@
 """
-generate_dbt_models.py
-─────────────────────
-Generates dbt SQL + YML from mapping sheets.
+generate_dbt_models.py  (v2 — registry-based)
+─────────────────────────────────────────────
+Generates dbt SQL + YML from mapping sheets with persistent memory.
 
-Smart ref() resolution:
-  For any raw table a model needs, we check if ANY other model at a
-  lower layer already processes that raw table. If yes → ref() it.
-  No hardcoded prefixes. Works for any naming convention.
+Key features:
+  1. SKILL        — skills/dbt_skill.md injected into every prompt (house style)
+  2. REGISTRY     — dbt/registry.json remembers every entity ever generated:
+                    layer, file, mapping hash, inputs, output columns.
+  3. SKIP         — unchanged mapping hash → no LLM call at all
+  4. UPDATE MODE  — changed mapping → LLM gets the PREVIOUS SQL and is asked
+                    to surgically update it, not regenerate from scratch
+  5. CROSS-RUN REFS — a new entity whose input is a model built in a past
+                    run (even from a different mapping file) gets ref()'d
+                    with its known output columns
+  6. LAYERS       — optional "Layer" column in the sheet wins; otherwise the
+                    layer is inferred from dependencies (no prefix sniffing)
+  7. SOURCES.YML  — registry-managed; regenerated only when new raw tables
+                    appear, always containing the full known set
 """
 
 import requests
 import json
 import os
 import time
+import hashlib
+import datetime
 import pandas as pd
 from pathlib import Path
 from collections import defaultdict
@@ -23,6 +35,8 @@ INVOKE_URL          = os.environ.get("INVOKE_URL", "https://integrate.api.nvidia
 API_KEY             = os.environ.get("API_KEY", "")
 MAPPING_DIR         = Path("mapping")
 DBT_MODELS_DIR      = Path("dbt/models/bigquery")
+REGISTRY_PATH       = Path("dbt/registry.json")
+SKILL_PATH          = Path("skills/dbt_skill.md")
 DELAY_BETWEEN_CALLS = 20
 MAX_RETRIES         = 5
 TIMEOUT             = (10, 300)
@@ -32,190 +46,219 @@ HEADERS = {
     "Accept": "text/event-stream"
 }
 
-# Layer processing order — lower number = processed first
-LAYER_ORDER = {
-    "staging":      0,
-    "intermediate": 1,
-    "marts":        2,
-}
+NULLISH = ("nan", "derived", "n/a", "na", "none", "")
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 1. Layer detection
+# Registry — persistent memory across runs (committed to git)
 # ─────────────────────────────────────────────────────────────────────
-def detect_layer(entity_name: str) -> str:
-    name = entity_name.lower()
-    if name.startswith(("fct_", "fact_")):
-        return "marts"
-    elif name.startswith(("stg_", "staging_")):
-        return "staging"
-    elif name.startswith(("int_", "intermediate_")):
-        return "intermediate"
-    elif name.startswith("dim_"):
-        return "staging"
+def load_registry() -> dict:
+    if REGISTRY_PATH.exists():
+        reg = json.loads(REGISTRY_PATH.read_text())
     else:
-        return "staging"
+        reg = {}
+    reg.setdefault("entities", {})
+    reg.setdefault("raw_tables", {})
+    return reg
 
 
-def layer_rank(entity_name: str) -> int:
-    return LAYER_ORDER.get(detect_layer(entity_name), 0)
+def save_registry(reg: dict):
+    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    REGISTRY_PATH.write_text(json.dumps(reg, indent=2, sort_keys=True))
+    print(f"Registry saved: {REGISTRY_PATH}")
+
+
+def load_skill() -> str:
+    if SKILL_PATH.exists():
+        return SKILL_PATH.read_text()
+    print(f"WARNING: skill file not found at {SKILL_PATH} — proceeding without it")
+    return ""
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 2. Detect raw source tables (tables not defined as any sheet/entity)
+# Mapping sheet parsing
 # ─────────────────────────────────────────────────────────────────────
-def detect_source_tables(xl: pd.ExcelFile) -> dict:
-    """Returns {raw_table: [columns_used]}"""
-    all_entities = set(s.strip().lower() for s in xl.sheet_names)
-    source_tables = {}
+def find_col(df: pd.DataFrame, *keywords) -> str | None:
+    """Find first column whose name contains ALL keywords (case-insensitive)."""
+    for c in df.columns:
+        cl = c.lower()
+        if all(k in cl for k in keywords):
+            return c
+    return None
+
+
+def sheet_hash(df: pd.DataFrame) -> str:
+    """Stable content fingerprint of a mapping sheet."""
+    normalized = df.fillna("").astype(str).to_csv(index=False)
+    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+
+
+def parse_mapping_file(mapping_file: Path) -> dict:
+    """
+    Parse every sheet into:
+      { entity_name: {
+          df, hash, mapping_text,
+          inputs: set of lowercase source-table values,
+          target_columns: [...],
+          layer_override: str | None
+      }}
+    """
+    xl = pd.ExcelFile(mapping_file)
+    entities = {}
 
     for sheet in xl.sheet_names:
+        name = sheet.strip()
         df = xl.parse(sheet)
-        src_table_col = next((c for c in df.columns if "source" in c.lower() and "table" in c.lower()), None)
-        src_col_col   = next((c for c in df.columns if "source" in c.lower() and "column" in c.lower()), None)
-        if src_table_col is None:
-            continue
 
-        for _, row in df.iterrows():
-            src_table = str(row.get(src_table_col, "")).strip().lower()
-            src_col   = str(row.get(src_col_col, "")).strip() if src_col_col else ""
+        src_col   = find_col(df, "source", "table")
+        tgt_col   = find_col(df, "target", "column") or find_col(df, "column")
+        layer_col = find_col(df, "layer")
 
-            if not src_table or src_table in ("nan", "derived", "n/a", ""):
-                continue
-            if src_table in all_entities:
-                continue
+        inputs = set()
+        if src_col:
+            inputs = {
+                str(v).strip().lower()
+                for v in df[src_col].dropna().unique()
+                if str(v).strip().lower() not in NULLISH
+            }
 
-            if src_table not in source_tables:
-                source_tables[src_table] = set()
-            if src_col and src_col.lower() not in ("nan", "n/a", ""):
-                source_tables[src_table].add(src_col)
-
-    return {t: sorted(cols) for t, cols in source_tables.items()}
-
-
-# ─────────────────────────────────────────────────────────────────────
-# 3. Build the model graph
-#    raw_table → list of (model_name, layer_rank) that consume it
-#    This is built from ALL sheets, not just dims.
-# ─────────────────────────────────────────────────────────────────────
-def build_model_graph(xl: pd.ExcelFile, raw_tables: dict) -> dict:
-    """
-    Returns:
-        graph = {
-            raw_table_name: [
-                {"model": "dim_users",  "rank": 0},
-                {"model": "fct_orders", "rank": 2},
-                ...
+        target_columns = []
+        if tgt_col:
+            target_columns = [
+                str(v).strip()
+                for v in df[tgt_col].dropna()
+                if str(v).strip().lower() not in NULLISH
             ]
+
+        layer_override = None
+        if layer_col:
+            vals = {
+                str(v).strip().lower()
+                for v in df[layer_col].dropna().unique()
+                if str(v).strip().lower() not in NULLISH
+            }
+            valid = vals & {"staging", "intermediate", "marts"}
+            if valid:
+                layer_override = sorted(valid)[0]
+
+        entities[name] = {
+            "df": df,
+            "hash": sheet_hash(df),
+            "mapping_text": df.to_string(index=False),
+            "inputs": inputs,
+            "target_columns": target_columns,
+            "layer_override": layer_override,
+            "mapping_file": str(mapping_file),
         }
-    Sorted by rank ascending (staging models first).
-    """
-    graph = defaultdict(list)
 
-    for sheet in xl.sheet_names:
-        entity_name = sheet.strip()
-        df = xl.parse(sheet)
-
-        src_table_col = next((c for c in df.columns if "source" in c.lower() and "table" in c.lower()), None)
-        if src_table_col is None:
-            continue
-
-        raw_tables_used = set(
-            str(v).strip().lower()
-            for v in df[src_table_col].dropna().unique()
-            if str(v).strip().lower() not in ("nan", "derived", "n/a", "")
-            and str(v).strip().lower() in raw_tables
-        )
-
-        for raw_table in raw_tables_used:
-            graph[raw_table].append({
-                "model": entity_name,
-                "rank":  layer_rank(entity_name),
-            })
-
-    # Sort each entry by rank so lower-layer models come first
-    for raw_table in graph:
-        graph[raw_table].sort(key=lambda x: x["rank"])
-
-    return dict(graph)
+    return entities
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 4. Intelligent source resolution
-#    For each raw table an entity needs:
-#    - Find all OTHER models that also use that raw table
-#    - If any of them have a LOWER layer rank → ref() the lowest-ranked one
-#    - Otherwise → source() directly
-#
-#    This works for ANY naming convention — no dim_ prefix assumption.
+# Input classification: raw table vs model (current run or registry)
 # ─────────────────────────────────────────────────────────────────────
-def resolve_sources(
-    df: pd.DataFrame,
-    entity_name: str,
-    raw_tables: dict,
-    model_graph: dict,
-) -> tuple[list, dict]:
+def classify_inputs(entity_inputs: set, current_entities: dict, registry: dict):
     """
-    Returns:
-        raw_sources: [table_name, ...]      → use {{ source('raw', table) }}
-        ref_sources: {table_name: model}    → use {{ ref(model) }}
+    For each input table name, decide:
+      - model in current run        → ref (will exist after this run)
+      - model in registry           → ref (built in a previous run)
+      - otherwise                   → raw source table
+    Returns (raw_inputs: list, ref_inputs: dict {input_name: model_name})
     """
-    src_table_col = next((c for c in df.columns if "source" in c.lower() and "table" in c.lower()), None)
-    if src_table_col is None:
-        return [], {}
+    current_lower  = {e.lower(): e for e in current_entities}
+    registry_lower = {e.lower(): e for e in registry["entities"]}
 
-    my_rank = layer_rank(entity_name)
-    raw_sources = []
-    ref_sources = {}
-
-    raw_tables_needed = set(
-        str(v).strip().lower()
-        for v in df[src_table_col].dropna().unique()
-        if str(v).strip().lower() not in ("nan", "derived", "n/a", "")
-        and str(v).strip().lower() in raw_tables
-    )
-
-    for raw_table in raw_tables_needed:
-        consumers = model_graph.get(raw_table, [])
-
-        # Find the best upstream model:
-        # - Must be a DIFFERENT model (not self)
-        # - Must have a LOWER layer rank (processed before us)
-        # - Among those, pick the LOWEST rank (most upstream/cleanest)
-        upstream_candidates = [
-            c for c in consumers
-            if c["model"].lower() != entity_name.lower()
-            and c["rank"] < my_rank
-        ]
-
-        if upstream_candidates:
-            # Pick the one with the lowest rank (most upstream)
-            # Break ties by preferring model whose name contains the raw table name
-            best = min(
-                upstream_candidates,
-                key=lambda c: (
-                    c["rank"],
-                    0 if raw_table in c["model"].lower() else 1
-                )
-            )
-            ref_sources[raw_table] = best["model"]
+    raw_inputs, ref_inputs = [], {}
+    for inp in sorted(entity_inputs):
+        if inp in current_lower:
+            ref_inputs[inp] = current_lower[inp]
+        elif inp in registry_lower:
+            ref_inputs[inp] = registry_lower[inp]
         else:
-            raw_sources.append(raw_table)
-
-    return raw_sources, ref_sources
-
-
-# ─────────────────────────────────────────────────────────────────────
-# 5. Determine processing order
-#    Sort by layer rank — staging first, marts last.
-#    Within same layer, alphabetical for consistency.
-# ─────────────────────────────────────────────────────────────────────
-def sort_by_layer(sheets: list[str]) -> list[str]:
-    return sorted(sheets, key=lambda s: (layer_rank(s.strip()), s.strip().lower()))
+            raw_inputs.append(inp)
+    return raw_inputs, ref_inputs
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 6. LLM call with retry
+# Layer: override column wins; else dependency inference; registry
+# value is sticky (an entity never silently moves folders)
+# ─────────────────────────────────────────────────────────────────────
+def infer_layers(current_entities: dict, registry: dict) -> dict:
+    """
+    Returns {entity_name: layer}.
+
+    Priority:
+      1. Registry (sticky — already assigned in a past run)
+      2. "Layer" column override in the sheet
+      3. Dependency inference:
+         - reads only raw tables                 → staging
+         - reads models, consumed by others      → intermediate
+         - reads models, terminal (no consumers) → marts
+    """
+    layers = {}
+
+    # who consumes whom (within current run + registry refs)
+    consumed_by = defaultdict(set)
+    for name, ent in current_entities.items():
+        _, refs = classify_inputs(ent["inputs"], current_entities, registry)
+        for model in refs.values():
+            consumed_by[model.lower()].add(name)
+
+    for name, ent in current_entities.items():
+        reg_entry = registry["entities"].get(name)
+
+        if reg_entry and reg_entry.get("layer"):
+            layers[name] = reg_entry["layer"]          # sticky
+        elif ent["layer_override"]:
+            layers[name] = ent["layer_override"]       # sheet override
+        else:
+            raw, refs = classify_inputs(ent["inputs"], current_entities, registry)
+            if not refs:
+                layers[name] = "staging"
+            elif consumed_by.get(name.lower()):
+                layers[name] = "intermediate"
+            else:
+                layers[name] = "marts"
+
+    return layers
+
+
+# ─────────────────────────────────────────────────────────────────────
+# Topological sort — dependencies built before dependents.
+# Registry entities count as already satisfied.
+# ─────────────────────────────────────────────────────────────────────
+def topo_sort(current_entities: dict, registry: dict) -> list:
+    names = list(current_entities.keys())
+    name_lower = {n.lower(): n for n in names}
+
+    deps = {}
+    for name, ent in current_entities.items():
+        _, refs = classify_inputs(ent["inputs"], current_entities, registry)
+        # only dependencies that are in THIS run matter for ordering
+        deps[name] = {
+            name_lower[m.lower()]
+            for m in refs.values()
+            if m.lower() in name_lower and m.lower() != name.lower()
+        }
+
+    ordered, placed = [], set()
+    remaining = dict(deps)
+    while remaining:
+        ready = sorted(n for n, d in remaining.items() if d <= placed)
+        if not ready:
+            # cycle — fall back to alphabetical to avoid infinite loop
+            print(f"WARNING: dependency cycle among {list(remaining)} — using alphabetical order")
+            ordered.extend(sorted(remaining))
+            break
+        for n in ready:
+            ordered.append(n)
+            placed.add(n)
+            del remaining[n]
+    return ordered
+
+
+# ─────────────────────────────────────────────────────────────────────
+# LLM call with retry
 # ─────────────────────────────────────────────────────────────────────
 def call_llm(prompt: str) -> str:
     for attempt in range(1, MAX_RETRIES + 1):
@@ -229,7 +272,6 @@ def call_llm(prompt: str) -> str:
                 "top_p":            1.00,
                 "stream":           True,
             }
-
             response = requests.post(INVOKE_URL, headers=HEADERS, json=payload, stream=True, timeout=TIMEOUT)
 
             if response.status_code == 429:
@@ -237,41 +279,35 @@ def call_llm(prompt: str) -> str:
                 print(f"Rate limited. Waiting {wait}s (retry {attempt}/{MAX_RETRIES})...")
                 time.sleep(wait)
                 continue
-
             if response.status_code != 200:
                 raise RuntimeError(f"API error {response.status_code}: {response.text}")
 
-            full_answer = ""
-            chunk_count = 0
-
+            full_answer, chunk_count = "", 0
             try:
                 for line in response.iter_lines():
-                    if line:
-                        decoded = line.decode("utf-8")
-                        if decoded.startswith("data: ") and decoded != "data: [DONE]":
-                            try:
-                                chunk   = json.loads(decoded[6:])
-                                choices = chunk.get("choices", [])
-                                if not choices:
-                                    continue
-                                delta = choices[0].get("delta", {})
-                                if delta.get("content"):
-                                    full_answer += delta["content"]
-                                    chunk_count += 1
-                                    if chunk_count % 20 == 0:
-                                        print(f"      Receiving... ({len(full_answer)} chars)")
-                            except json.JSONDecodeError:
-                                pass
-
+                    if not line:
+                        continue
+                    decoded = line.decode("utf-8")
+                    if decoded.startswith("data: ") and decoded != "data: [DONE]":
+                        try:
+                            chunk   = json.loads(decoded[6:])
+                            choices = chunk.get("choices", [])
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta", {})
+                            if delta.get("content"):
+                                full_answer += delta["content"]
+                                chunk_count += 1
+                                if chunk_count % 20 == 0:
+                                    print(f"      Receiving... ({len(full_answer)} chars)")
+                        except json.JSONDecodeError:
+                            pass
             except ChunkedEncodingError as e:
                 print(f"Stream cut off after {len(full_answer)} chars (attempt {attempt}/{MAX_RETRIES}): {e}")
                 if attempt < MAX_RETRIES:
-                    wait = DELAY_BETWEEN_CALLS * attempt
-                    print(f"Retrying in {wait}s...")
-                    time.sleep(wait)
+                    time.sleep(DELAY_BETWEEN_CALLS * attempt)
                     continue
-                else:
-                    raise
+                raise
 
             if len(full_answer) < 10:
                 print(f"Response too short ({len(full_answer)} chars). Retrying...")
@@ -282,91 +318,120 @@ def call_llm(prompt: str) -> str:
             return full_answer.strip()
 
         except (Timeout, ConnectionError) as e:
-            wait = DELAY_BETWEEN_CALLS * attempt
-            print(f"Network error (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}. Waiting {wait}s...")
-            time.sleep(wait)
-
+            print(f"Network error (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}")
+            time.sleep(DELAY_BETWEEN_CALLS * attempt)
         except RequestException as e:
-            wait = DELAY_BETWEEN_CALLS * attempt
-            print(f"Request error (attempt {attempt}/{MAX_RETRIES}): {e}. Waiting {wait}s...")
-            time.sleep(wait)
+            print(f"Request error (attempt {attempt}/{MAX_RETRIES}): {e}")
+            time.sleep(DELAY_BETWEEN_CALLS * attempt)
 
     raise RuntimeError(f"Failed after {MAX_RETRIES} retries.")
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 7. Prompts
+# Prompt builders
 # ─────────────────────────────────────────────────────────────────────
-def sources_yml_prompt(source_tables: dict) -> str:
+def reference_block(raw_inputs: list, ref_inputs: dict, registry: dict, current_entities: dict) -> str:
+    """Tells the LLM exactly how to reference every input, with known columns."""
+    lines = []
+    for t in raw_inputs:
+        lines.append(f"- {{{{ source('raw', '{t}') }}}}  (raw table)")
+    for inp, model in ref_inputs.items():
+        cols = []
+        if model in registry["entities"]:
+            cols = registry["entities"][model].get("output_columns", [])
+        elif model in current_entities:
+            cols = current_entities[model].get("target_columns", [])
+        col_hint = f" — output columns: {', '.join(cols)}" if cols else ""
+        lines.append(
+            f"- {{{{ ref('{model}') }}}}  (existing model replacing raw `{inp}`; "
+            f"use its cleaned column names{col_hint})"
+        )
+    return "\n".join(lines) if lines else "- see mapping"
+
+
+def create_sql_prompt(name, layer, mapping_text, ref_block, skill) -> str:
+    return f"""You are a senior dbt developer. CREATE a new dbt SQL model `{name}` (layer: {layer}).
+
+=== HOUSE STYLE (follow exactly) ===
+{skill}
+
+=== MAPPING ===
+{mapping_text}
+
+=== HOW TO REFERENCE EVERY INPUT (follow exactly) ===
+{ref_block}
+
+Apply ALL transformations from the "Transformation (SQL Snippet)" column exactly.
+Output ONLY raw SQL, no markdown, no explanation."""
+
+
+def update_sql_prompt(name, layer, mapping_text, ref_block, skill, previous_sql) -> str:
+    return f"""You are a senior dbt developer. UPDATE an existing dbt SQL model `{name}` (layer: {layer}).
+The mapping sheet has changed. Modify the previous model to match the NEW mapping.
+PRESERVE all structure, style, and logic that is still correct — make surgical changes only.
+
+=== HOUSE STYLE (follow exactly) ===
+{skill}
+
+=== PREVIOUS MODEL (your earlier output) ===
+{previous_sql}
+
+=== NEW MAPPING (the source of truth now) ===
+{mapping_text}
+
+=== HOW TO REFERENCE EVERY INPUT (follow exactly) ===
+{ref_block}
+
+Apply ALL transformations from the "Transformation (SQL Snippet)" column exactly.
+Output ONLY the full updated raw SQL, no markdown, no explanation, no diff — the complete file."""
+
+
+def yml_prompt(name, mapping_text, skill) -> str:
+    return f"""You are a senior dbt developer. Generate the dbt schema YAML for `{name}`.
+
+=== HOUSE STYLE (follow exactly) ===
+{skill}
+
+=== MAPPING ===
+{mapping_text}
+
+Output ONLY raw YAML, no markdown, no explanation."""
+
+
+def sources_yml_prompt(raw_tables: dict) -> str:
     lines = [
         f"- table: {t}, columns: {', '.join(cols) if cols else 'unknown'}"
-        for t, cols in source_tables.items()
+        for t, cols in sorted(raw_tables.items())
     ]
-    return f"""Write a dbt sources.yml file.
+    return f"""Write a complete dbt sources.yml file.
 Source name: raw
-Tables:
+Tables (this is the FULL list — include every one):
 {chr(10).join(lines)}
 
 Output ONLY raw YAML, no markdown, no explanation."""
 
 
-def sql_prompt(
-    entity_name: str,
-    layer: str,
-    mapping_text: str,
-    raw_sources: list,
-    ref_sources: dict,
-) -> str:
-    lines = []
-    for t in raw_sources:
-        lines.append(f"  - {{{{ source('raw', '{t}') }}}}  ← raw table, not yet modelled")
-    for raw_table, model in ref_sources.items():
-        lines.append(
-            f"  - {{{{ ref('{model}') }}}}  ← use this instead of raw `{raw_table}`; "
-            f"`{model}` already cleans/transforms `{raw_table}`"
-        )
-
-    source_block = "\n".join(lines) or "  - see mapping"
-
-    return f"""You are a senior dbt developer. Generate a dbt SQL model for `{entity_name}` (layer: {layer}).
-
-MAPPING:
-{mapping_text}
-
-HOW TO REFERENCE DATA — follow this exactly:
-{source_block}
-
-STRICT RULES:
-- NEVER use source() for any table that has a ref() listed above
-- When using a ref() model, use its OUTPUT column names (already cleaned/snake_case), NOT the raw column names
-- Structure: one CTE per source or ref → transformations CTE → final SELECT
-- JOIN models on their cleaned key columns (e.g. user_id not `User-ID`)
-- Apply ALL transformations from "Transformation (SQL Snippet)" column exactly
-- Add a comment block at top listing: model name, description, all source() and ref() used
-- Output ONLY raw SQL, no markdown, no explanation"""
-
-
-def yml_prompt(entity_name: str, mapping_text: str) -> str:
-    return f"""You are a senior dbt developer. Generate a dbt schema YAML for `{entity_name}`.
-
-MAPPING:
-{mapping_text}
-
-RULES:
-- Start with: version: 2
-- Add model name and a meaningful description
-- List EVERY target column with:
-    - name
-    - description (from Notes column, or infer from transformation)
-    - data_tests:
-        * Primary key columns: [not_null, unique]
-        * Foreign key columns: [not_null]
-        * Categorical derived columns: accepted_values (infer values from transformation logic)
-- Output ONLY raw YAML, no markdown"""
+# ─────────────────────────────────────────────────────────────────────
+# Raw-table column collection (for sources.yml + registry)
+# ─────────────────────────────────────────────────────────────────────
+def collect_raw_columns(current_entities: dict, raw_table_names: set) -> dict:
+    cols = defaultdict(set)
+    for ent in current_entities.values():
+        df = ent["df"]
+        src_t = find_col(df, "source", "table")
+        src_c = find_col(df, "source", "column")
+        if not src_t:
+            continue
+        for _, row in df.iterrows():
+            t = str(row.get(src_t, "")).strip().lower()
+            c = str(row.get(src_c, "")).strip() if src_c else ""
+            if t in raw_table_names and c and c.lower() not in NULLISH:
+                cols[t].add(c)
+    return {t: sorted(c) for t, c in cols.items()}
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 8. Save
+# Save helper
 # ─────────────────────────────────────────────────────────────────────
 def save_file(content: str, filepath: Path):
     filepath.parent.mkdir(parents=True, exist_ok=True)
@@ -375,71 +440,109 @@ def save_file(content: str, filepath: Path):
 
 
 # ─────────────────────────────────────────────────────────────────────
-# 9. Process one mapping file
+# Process one mapping file
 # ─────────────────────────────────────────────────────────────────────
-def process_mapping(mapping_file: Path):
-    print(f"\n{'='*60}")
-    print(f"Processing: {mapping_file}")
-    print(f"{'='*60}")
+def process_mapping(mapping_file: Path, registry: dict, skill: str):
+    print(f"\n{'='*60}\nProcessing: {mapping_file}\n{'='*60}")
 
-    xl     = pd.ExcelFile(mapping_file)
-    sheets = xl.sheet_names
-    print(f"Found {len(sheets)} entities: {sheets}")
+    current = parse_mapping_file(mapping_file)
+    print(f"Entities in file: {list(current)}")
 
-    # Build the full picture before generating anything
-    raw_tables   = detect_source_tables(xl)
-    model_graph  = build_model_graph(xl, raw_tables)
+    # ── classify all inputs & find raw tables ─────────────────────
+    all_raw = set()
+    for name, ent in current.items():
+        raw, refs = classify_inputs(ent["inputs"], current, registry)
+        ent["raw_inputs"], ent["ref_inputs"] = raw, refs
+        all_raw.update(raw)
 
-    print(f"\nRaw tables   : {list(raw_tables.keys())}")
-    print(f"Model graph  :")
-    for t, consumers in model_graph.items():
-        print(f"  {t} → {[c['model'] for c in consumers]}")
-
-    # sources.yml
-    sources_path = DBT_MODELS_DIR / "sources.yml"
-    if not sources_path.exists():
-        print(f"\nGenerating sources.yml...")
-        save_file(call_llm(sources_yml_prompt(raw_tables)), sources_path)
+    # ── sources.yml (registry-managed: regenerate on NEW raw table) ─
+    raw_cols = collect_raw_columns(current, all_raw)
+    new_tables = [t for t in raw_cols if t not in registry["raw_tables"]]
+    # also merge any new columns on known tables
+    cols_changed = any(
+        set(raw_cols.get(t, [])) - set(registry["raw_tables"].get(t, []))
+        for t in raw_cols
+    )
+    if new_tables or cols_changed:
+        for t, c in raw_cols.items():
+            merged = sorted(set(registry["raw_tables"].get(t, [])) | set(c))
+            registry["raw_tables"][t] = merged
+        print(f"\nNew/changed raw tables detected: {new_tables or '(columns updated)'}")
+        print("Regenerating sources.yml with full known table set...")
+        save_file(
+            call_llm(sources_yml_prompt(registry["raw_tables"])),
+            DBT_MODELS_DIR / "sources.yml"
+        )
         time.sleep(DELAY_BETWEEN_CALLS)
     else:
-        print(f"\nsources.yml already exists — skipping")
+        print("\nsources.yml up to date — skipping")
 
-    # Process in layer order
-    ordered = sort_by_layer(sheets)
-    print(f"\nProcessing order: {ordered}\n")
+    # ── layers + processing order ──────────────────────────────────
+    layers  = infer_layers(current, registry)
+    ordered = topo_sort(current, registry)
+    print(f"\nLayers: {layers}")
+    print(f"Order : {ordered}\n")
 
-    for sheet in ordered:
-        entity_name  = sheet.strip()
-        layer        = detect_layer(entity_name)
-        df           = xl.parse(sheet)
-        mapping_text = df.to_string(index=False)
+    # ── generate each entity ───────────────────────────────────────
+    for name in ordered:
+        ent       = current[name]
+        layer     = layers[name]
+        reg_entry = registry["entities"].get(name)
+        sql_path  = DBT_MODELS_DIR / layer / f"{name}.sql"
+        yml_path  = DBT_MODELS_DIR / layer / f"_{name}.yml"
 
-        # Intelligently resolve source() vs ref()
-        raw_srcs, ref_srcs = resolve_sources(df, entity_name, raw_tables, model_graph)
+        ref_block = reference_block(ent["raw_inputs"], ent["ref_inputs"], registry, current)
 
-        print(f"[{layer.upper()}] {entity_name}")
-        print(f"  source() → {raw_srcs}")
-        print(f"  ref()    → {ref_srcs}")
+        # ── SKIP: unchanged ────────────────────────────────────────
+        if reg_entry and reg_entry.get("mapping_hash") == ent["hash"] and sql_path.exists():
+            print(f"[SKIP] {name} — mapping unchanged")
+            continue
 
-        print("  Generating SQL...")
-        save_file(
-            call_llm(sql_prompt(entity_name, layer, mapping_text, raw_srcs, ref_srcs)),
-            DBT_MODELS_DIR / layer / f"{entity_name}.sql"
-        )
+        # ── UPDATE: existing model, mapping changed ────────────────
+        if reg_entry and sql_path.exists():
+            print(f"[UPDATE] {name} ({layer})")
+            print(f"  source() → {ent['raw_inputs']}")
+            print(f"  ref()    → {ent['ref_inputs']}")
+            previous_sql = sql_path.read_text()
+            print("  Updating SQL...")
+            save_file(
+                call_llm(update_sql_prompt(name, layer, ent["mapping_text"], ref_block, skill, previous_sql)),
+                sql_path
+            )
+        # ── CREATE: new entity ─────────────────────────────────────
+        else:
+            print(f"[CREATE] {name} ({layer})")
+            print(f"  source() → {ent['raw_inputs']}")
+            print(f"  ref()    → {ent['ref_inputs']}")
+            print("  Generating SQL...")
+            save_file(
+                call_llm(create_sql_prompt(name, layer, ent["mapping_text"], ref_block, skill)),
+                sql_path
+            )
         time.sleep(DELAY_BETWEEN_CALLS)
 
         print("  Generating YAML...")
-        save_file(
-            call_llm(yml_prompt(entity_name, mapping_text)),
-            DBT_MODELS_DIR / layer / f"_{entity_name}.yml"
-        )
+        save_file(call_llm(yml_prompt(name, ent["mapping_text"], skill)), yml_path)
         time.sleep(DELAY_BETWEEN_CALLS)
 
+        # ── record in registry ─────────────────────────────────────
+        registry["entities"][name] = {
+            "layer":          layer,
+            "file":           str(sql_path),
+            "mapping_hash":   ent["hash"],
+            "sources":        ent["raw_inputs"],
+            "refs":           sorted(set(ent["ref_inputs"].values())),
+            "output_columns": ent["target_columns"],
+            "mapping_file":   ent["mapping_file"],
+            "last_generated": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+        save_registry(registry)   # save after every entity — crash-safe
+
 
 # ─────────────────────────────────────────────────────────────────────
-# 10. Entry point
+# Entry point
 # ─────────────────────────────────────────────────────────────────────
-def get_mapping_files() -> list[Path]:
+def get_mapping_files() -> list:
     changed = os.environ.get("CHANGED_FILES", "").strip()
     if changed:
         files = [Path(f) for f in changed.split() if f.endswith(".xlsx") and Path(f).exists()]
@@ -453,9 +556,17 @@ def get_mapping_files() -> list[Path]:
 def main():
     if not API_KEY:
         raise EnvironmentError("API_KEY environment variable is not set.")
+
+    registry = load_registry()
+    skill    = load_skill()
+    print(f"Registry: {len(registry['entities'])} known entities, "
+          f"{len(registry['raw_tables'])} known raw tables")
+
     for f in get_mapping_files():
-        process_mapping(f)
-    print(f"\nAll done! Files in: {DBT_MODELS_DIR}/")
+        process_mapping(f, registry, skill)
+
+    save_registry(registry)
+    print(f"\nAll done! Models in {DBT_MODELS_DIR}/, memory in {REGISTRY_PATH}")
 
 
 if __name__ == "__main__":
