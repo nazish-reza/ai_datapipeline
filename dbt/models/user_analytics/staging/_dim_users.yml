@@ -1,0 +1,19 @@
+version: 2
+models:
+  - name: dim_users
+    description: User dimension table with one row per user, containing user demographic information.
+    columns:
+      - name: user_id
+        description: Primary key. User-ID cast as integer.
+        data_tests:
+          - not_null
+          - unique
+      - name: location_raw
+        description: Raw location string trimmed of whitespace.
+      - name: age
+        description: User age cast as integer.
+      - name: age_group
+        description: Derived age bucket from CASE logic.
+        data_tests:
+          - accepted_values:
+              values: ['under 18', '18-24', '25-34', '35-44', '45-54', '55-64', '65+']

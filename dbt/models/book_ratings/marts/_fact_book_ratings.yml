@@ -1,0 +1,30 @@
+version: 2
+models:
+  - name: fact_book_ratings
+    description: Fact table containing book ratings by users, with one row per rating event.
+    columns:
+      - name: rating_id
+        description: Primary key, generated via row_number().
+        data_tests:
+          - not_null
+          - unique
+      - name: user_id
+        description: Foreign key to dim_users. Identifies the user who submitted the rating.
+        data_tests:
+          - not_null
+      - name: book_id
+        description: Foreign key to dim_books. Identifies the book that was rated.
+        data_tests:
+          - not_null
+      - name: rating
+        description: Raw numeric rating value between 0 and 10.
+      - name: rating_category
+        description: Categorical bucket for the rating, derived from the raw rating value.
+        data_tests:
+          - accepted_values:
+              values:
+                - low
+                - medium
+                - high
+      - name: rating_date
+        description: Timestamp when the rating record was loaded into the system.

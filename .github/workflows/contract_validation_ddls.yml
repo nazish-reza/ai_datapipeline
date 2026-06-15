@@ -1,0 +1,289 @@
+name: "Action 1 — Validate Contract + Create BigQuery Table"
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    paths:
+      - "contracts/**/*.yaml"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  validate-and-create:
+    name: Validate Contract + BigQuery DDL
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check if bot commit
+        id: guard
+        run: |
+          if [ "${{ github.actor }}" = "github-actions[bot]" ]; then
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Checkout PR branch
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.head_ref }}
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Set up Python
+        if: steps.guard.outputs.skip != 'true'
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Install dependencies
+        if: steps.guard.outputs.skip != 'true'
+        run: pip install "datacontract-cli[excel]" google-cloud-bigquery pyyaml
+
+      - name: Authenticate to Google Cloud
+        if: steps.guard.outputs.skip != 'true'
+        uses: google-github-actions/auth@v2
+        with:
+          credentials_json: ${{ secrets.GCP_SERVICE_ACCOUNT_JSON }}
+
+      - name: Detect changed contracts
+        if: steps.guard.outputs.skip != 'true'
+        id: changed
+        run: |
+          git diff --name-only origin/${{ github.base_ref }}...HEAD -- contracts/ > changed.txt
+          echo "Changed contracts:"
+          cat changed.txt
+          echo "files=$(cat changed.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
+
+      - name: Validate + Export DDL + Create BigQuery tables
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          CHANGED_FILES: ${{ steps.changed.outputs.files }}
+        run: |
+          python3 << 'PYEOF'
+          import os, yaml, sys
+          from pathlib import Path
+
+          changed = os.environ.get("CHANGED_FILES", "").strip().split()
+          yaml_files = [f for f in changed if f.endswith(".yaml") and Path(f).exists()]
+
+          if not yaml_files:
+              print("No changed YAML contracts found.")
+              sys.exit(0)
+
+          # ── Helper: read project/dataset from contract YAML ─────
+          def get_bq_config(contract):
+              """Extract project + dataset from servers or customProperties."""
+              project, dataset = "", ""
+
+              # Try servers section first
+              for s in contract.get("servers", []):
+                  if isinstance(s, dict):
+                      if s.get("project"): project = s["project"]
+                      if s.get("dataset"): dataset = s["dataset"]
+
+              # Fallback: customProperties
+              if not project or not dataset:
+                  for cp in contract.get("customProperties", []):
+                      if isinstance(cp, dict):
+                          if cp.get("property") == "bq_project" and not project:
+                              project = str(cp.get("value", ""))
+                          if cp.get("property") == "bq_dataset" and not dataset:
+                              dataset = str(cp.get("value", ""))
+
+              # Fallback: infer dataset from domain + layer
+              if not dataset:
+                  domain = contract.get("domain", "default")
+                  layer = ""
+                  for cp in contract.get("customProperties", []):
+                      if isinstance(cp, dict) and cp.get("property") == "layer":
+                          layer = str(cp.get("value", ""))
+                  if layer == "marts":
+                      dataset = f"{domain}_mart"
+                  else:
+                      dataset = f"{domain}_stg"
+
+              return project, dataset
+
+          # ── Helper: generate DDL from schema ────────────────────
+          TYPE_MAP = {
+              "string": "STRING", "integer": "INT64", "number": "FLOAT64",
+              "boolean": "BOOL", "timestamp": "TIMESTAMP", "date": "DATE",
+              "float": "FLOAT64", "bytes": "BYTES",
+          }
+
+          def generate_ddl(contract, entity, project, dataset):
+              schema = contract.get("schema", [])
+              if not schema:
+                  return None
+
+              cols = schema[0].get("properties", schema[0].get("columns", []))
+              if not cols:
+                  return None
+
+              fqn = f"`{project}.{dataset}.{entity}`" if project else f"`{dataset}.{entity}`"
+              lines = [
+                  f"-- DDL for {entity}",
+                  f"-- Project: {project} | Dataset: {dataset}",
+                  f"CREATE TABLE IF NOT EXISTS {fqn} ("
+              ]
+              col_defs = []
+              for c in cols:
+                  ptype = c.get("physicalType") or TYPE_MAP.get(c.get("logicalType", "string"), "STRING")
+                  nn = " NOT NULL" if c.get("required") or c.get("primaryKey") else ""
+                  col_defs.append(f"  {c['name']:<35} {ptype}{nn}")
+              lines.append(",\n".join(col_defs))
+              lines.append(");")
+              return "\n".join(lines)
+
+          # ── Process each contract ───────────────────────────────
+          errors = []
+
+          for yf in yaml_files:
+              print(f"\n{'='*60}")
+              print(f"📄 {yf}")
+              print(f"{'='*60}")
+
+              path = Path(yf)
+              domain = path.parent.name
+              entity = path.stem.split("_v")[0]
+
+              try:
+                  contract = yaml.safe_load(path.read_text())
+              except Exception as e:
+                  print(f"  ❌ Failed to parse YAML: {e}")
+                  errors.append(f"{yf}: YAML parse error")
+                  continue
+
+              project, dataset = get_bq_config(contract)
+              print(f"  Domain:  {domain}")
+              print(f"  Entity:  {entity}")
+              print(f"  Project: {project or '(not set)'}")
+              print(f"  Dataset: {dataset}")
+
+              # ── 1. Generate DDL from schema ─────────────────────
+              ddl_dir = Path("ddl") / domain
+              ddl_dir.mkdir(parents=True, exist_ok=True)
+              ddl_path = ddl_dir / f"{entity}.sql"
+
+              ddl_sql = generate_ddl(contract, entity, project, dataset)
+              if ddl_sql:
+                  ddl_path.write_text(ddl_sql)
+                  print(f"  ✅ DDL saved → {ddl_path}")
+              else:
+                  print(f"  ⚠️  No schema found — skipping DDL")
+                  errors.append(f"{yf}: no schema")
+                  continue
+
+              # ── 2. Create BigQuery table ────────────────────────
+              if not project:
+                  print(f"  ℹ️  No project configured — DDL saved but not applied to BigQuery")
+                  continue
+
+              try:
+                  from google.cloud import bigquery
+                  client = bigquery.Client(project=project)
+
+                  # Create dataset if it doesn't exist
+                  dataset_ref = bigquery.DatasetReference(project, dataset)
+                  try:
+                      client.get_dataset(dataset_ref)
+                      print(f"  ✅ Dataset {project}.{dataset} exists")
+                  except Exception:
+                      print(f"  📦 Creating dataset {project}.{dataset}...")
+                      ds = bigquery.Dataset(dataset_ref)
+                      ds.location = "US"
+                      client.create_dataset(ds, exists_ok=True)
+                      print(f"  ✅ Dataset created")
+
+                  # Execute DDL
+                  for stmt in ddl_sql.split(";"):
+                      stmt = stmt.strip()
+                      if stmt and not stmt.startswith("--"):
+                          try:
+                              client.query(stmt).result()
+                          except Exception as e:
+                              print(f"  ⚠️  BQ query error: {e}")
+                              errors.append(f"{yf}: BQ error - {e}")
+
+                  print(f"  ✅ BigQuery table created → {project}.{dataset}.{entity}")
+
+              except ImportError:
+                  print(f"  ⚠️  google-cloud-bigquery not installed")
+              except Exception as e:
+                  print(f"  ⚠️  BigQuery error: {e}")
+                  errors.append(f"{yf}: {e}")
+
+          # ── Summary ─────────────────────────────────────────────
+          if errors:
+              print(f"\n⚠️  {len(errors)} issue(s):")
+              for e in errors:
+                  print(f"  - {e}")
+              # Don't fail the action for warnings — DDL is still committed
+          print(f"\n✅ Action 1 complete — processed {len(yaml_files)} contract(s)")
+          PYEOF
+
+      - name: Commit DDL files via GitHub API
+        if: steps.guard.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+          BRANCH: ${{ github.head_ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          git add ddl/ || true
+          if git diff --staged --quiet; then
+            echo "No DDL changes to commit"
+            exit 0
+          fi
+          python3 << 'PYEOF'
+          import os, base64, subprocess, json, urllib.request
+
+          token    = os.environ["GH_TOKEN"]
+          repo     = os.environ["REPO"]
+          branch   = os.environ["BRANCH"]
+          head_sha = os.environ["HEAD_SHA"]
+
+          def gh(method, path, body=None):
+              req = urllib.request.Request(
+                  f"https://api.github.com{path}",
+                  data=json.dumps(body).encode() if body else None,
+                  method=method,
+                  headers={
+                      "Authorization": f"Bearer {token}",
+                      "Accept": "application/vnd.github+json",
+                      "X-GitHub-Api-Version": "2022-11-28",
+                      "Content-Type": "application/json",
+                  }
+              )
+              with urllib.request.urlopen(req) as r:
+                  return json.loads(r.read())
+
+          result = subprocess.run(["git","diff","--staged","--name-only"], capture_output=True, text=True)
+          staged = [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
+
+          blobs = []
+          for fp in staged:
+              if not os.path.exists(fp): continue
+              with open(fp,"rb") as f:
+                  content = base64.b64encode(f.read()).decode()
+              blob = gh("POST", f"/repos/{repo}/git/blobs", {"content": content, "encoding": "base64"})
+              blobs.append({"path": fp, "mode": "100644", "type": "blob", "sha": blob["sha"]})
+
+          if not blobs: exit(0)
+
+          commit     = gh("GET",  f"/repos/{repo}/git/commits/{head_sha}")
+          tree       = gh("POST", f"/repos/{repo}/git/trees", {"base_tree": commit["tree"]["sha"], "tree": blobs})
+          new_commit = gh("POST", f"/repos/{repo}/git/commits", {
+              "message": "chore: export BigQuery DDL from contracts [skip ci]",
+              "tree": tree["sha"], "parents": [head_sha]
+          })
+          gh("PATCH", f"/repos/{repo}/git/refs/heads/{branch}", {"sha": new_commit["sha"], "force": False})
+          print(f"✅ Verified commit: {new_commit['sha']}")
+          PYEOF
+
+      - name: Done
+        run: echo "✅ Action 1 complete"

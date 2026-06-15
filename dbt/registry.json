@@ -1,0 +1,178 @@
+{
+  "entities": {
+    "dim_authors": {
+      "contract_hash": "acafab26360c98cb",
+      "contract_yaml": "contracts/book_catalog/dim_authors_v1.0.0.yaml",
+      "domain": "book_catalog",
+      "file": "dbt/models/book_catalog/staging/dim_authors.sql",
+      "last_generated": "2026-06-15T16:12:43.676340Z",
+      "layer": "staging",
+      "output_columns": [
+        "author_id",
+        "author_name"
+      ],
+      "refs": [],
+      "sources": [
+        "books"
+      ],
+      "version": "1.0.0"
+    },
+    "dim_books": {
+      "contract_hash": "4d6cef206d8efe71",
+      "contract_yaml": "contracts/book_catalog/dim_books_v1.0.0.yaml",
+      "domain": "book_catalog",
+      "file": "dbt/models/book_catalog/staging/dim_books.sql",
+      "last_generated": "2026-06-15T16:25:44.199663Z",
+      "layer": "staging",
+      "output_columns": [
+        "book_id",
+        "title",
+        "author_name",
+        "publication_year",
+        "publisher_name",
+        "image_small",
+        "image_medium",
+        "image_large"
+      ],
+      "refs": [],
+      "sources": [
+        "books"
+      ],
+      "version": "1.0.0"
+    },
+    "dim_location": {
+      "contract_hash": "75b3858fa5ccdbe2",
+      "contract_yaml": "contracts/user_analytics/dim_location_v1.0.0.yaml",
+      "domain": "user_analytics",
+      "file": "dbt/models/user_analytics/staging/dim_location.sql",
+      "last_generated": "2026-06-15T16:41:59.772727Z",
+      "layer": "staging",
+      "output_columns": [
+        "location_id",
+        "city",
+        "state",
+        "country"
+      ],
+      "refs": [],
+      "sources": [
+        "users"
+      ],
+      "version": "1.0.0"
+    },
+    "dim_publishers": {
+      "contract_hash": "840db83b13141ee3",
+      "contract_yaml": "contracts/book_catalog/dim_publishers_v1.0.0.yaml",
+      "domain": "book_catalog",
+      "file": "dbt/models/book_catalog/staging/dim_publishers.sql",
+      "last_generated": "2026-06-15T16:50:35.408904Z",
+      "layer": "staging",
+      "output_columns": [
+        "publisher_id",
+        "publisher_name"
+      ],
+      "refs": [],
+      "sources": [
+        "books"
+      ],
+      "version": "1.0.0"
+    },
+    "dim_users": {
+      "contract_hash": "87ee2852164d93e9",
+      "contract_yaml": "contracts/user_analytics/dim_users_v1.0.0.yaml",
+      "domain": "user_analytics",
+      "file": "dbt/models/user_analytics/staging/dim_users.sql",
+      "last_generated": "2026-06-15T17:05:42.108906Z",
+      "layer": "staging",
+      "output_columns": [
+        "user_id",
+        "location_raw",
+        "age",
+        "age_group"
+      ],
+      "refs": [],
+      "sources": [
+        "users"
+      ],
+      "version": "1.0.0"
+    },
+    "fact_book_ratings": {
+      "contract_hash": "3f47c1bd93e729ef",
+      "contract_yaml": "contracts/book_ratings/fact_book_ratings_v1.0.0.yaml",
+      "domain": "book_ratings",
+      "file": "dbt/models/book_ratings/marts/fact_book_ratings.sql",
+      "last_generated": "2026-06-15T17:27:10.192558Z",
+      "layer": "marts",
+      "output_columns": [
+        "rating_id",
+        "user_id",
+        "book_id",
+        "rating",
+        "rating_category",
+        "rating_date"
+      ],
+      "refs": [
+        "dim_users",
+        "dim_books"
+      ],
+      "sources": [
+        "dim_users",
+        "dim_books",
+        "ratings"
+      ],
+      "version": "1.0.0"
+    },
+    "fct_user_book_insights": {
+      "contract_hash": "9a17884993fcce2f",
+      "contract_yaml": "contracts/book_insights/fct_user_book_insights_v1.0.0.yaml",
+      "domain": "book_insights",
+      "file": "dbt/models/book_insights/marts/fct_user_book_insights.sql",
+      "last_generated": "2026-06-15T17:46:56.731619Z",
+      "layer": "marts",
+      "output_columns": [
+        "insight_id",
+        "user_id",
+        "book_id",
+        "author_name",
+        "publisher_name",
+        "user_age_group",
+        "avg_user_rating",
+        "avg_book_rating",
+        "rating_deviation",
+        "user_location_country",
+        "high_rating_flag"
+      ],
+      "refs": [
+        "dim_users",
+        "dim_books"
+      ],
+      "sources": [
+        "dim_users",
+        "dim_books",
+        "ratings"
+      ],
+      "version": "1.0.0"
+    }
+  },
+  "raw_tables": {
+    "books": [
+      "Book-Author",
+      "Book-Title",
+      "ISBN",
+      "Image-URL-L",
+      "Image-URL-M",
+      "Image-URL-S",
+      "Publisher",
+      "Year-Of-Publication"
+    ],
+    "ratings": [
+      "Book-Rating",
+      "ISBN",
+      "User-ID"
+    ],
+    "users": [
+      "Age",
+      "Location",
+      "User-ID"
+    ]
+  }
+}

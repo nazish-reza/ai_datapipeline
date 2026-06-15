@@ -1,0 +1,254 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/><title>Data Contract Manager</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.2/babel.min.js"></script>
+<style>
+:root{--bg:#f8f9fb;--white:#fff;--surface:#f3f4f6;--border:#e5e7eb;--border2:#d1d5db;--text:#111827;--text2:#374151;--muted:#6b7280;--dim:#9ca3af;--primary:#6366f1;--primary-bg:#eef2ff;--green:#059669;--green-bg:#ecfdf5;--amber:#d97706;--amber-bg:#fffbeb;--red:#dc2626;--red-bg:#fef2f2;--blue:#2563eb;--blue-bg:#eff6ff;--purple:#7c3aed;--pink:#e74694;--mono:'SF Mono','Menlo',monospace;--sans:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;--radius:8px;--radius-lg:12px;--shadow:0 1px 3px rgba(0,0,0,.06)}
+*{box-sizing:border-box;margin:0;padding:0}html,body,#root{height:100%;overflow:hidden}body{font-family:var(--sans);background:var(--bg);color:var(--text)}::-webkit-scrollbar{width:6px}::-webkit-scrollbar-thumb{background:var(--border2);border-radius:3px}
+.topnav{height:52px;background:var(--white);border-bottom:1px solid var(--border);display:flex;align-items:center;padding:0 20px;gap:16px;flex-shrink:0;box-shadow:var(--shadow);z-index:10}
+.logo{display:flex;align-items:center;gap:10px}.logo-icon{width:30px;height:30px;background:var(--primary);border-radius:var(--radius);display:flex;align-items:center;justify-content:center}
+.logo-icon svg{width:16px;height:16px}.logo-text{font-weight:600;font-size:14px}
+.nav-tabs{display:flex;gap:2px;margin-left:16px;height:100%}.nav-tab{padding:0 14px;font-size:13px;font-weight:500;color:var(--muted);border:none;background:none;cursor:pointer;height:100%;display:flex;align-items:center;border-bottom:2px solid transparent;transition:.15s}.nav-tab:hover{color:var(--text)}.nav-tab.active{color:var(--primary);border-bottom-color:var(--primary)}
+.nav-right{margin-left:auto}.avatar{width:30px;height:30px;border-radius:50%;background:var(--surface);border:1px solid var(--border);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:var(--muted)}
+.layout{display:flex;height:calc(100vh - 52px)}.sidebar{width:270px;background:var(--white);border-right:1px solid var(--border);display:flex;flex-direction:column;flex-shrink:0}
+.sidebar-header{padding:14px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}.sidebar-title{font-weight:600;font-size:14px}.sidebar-count{font-size:11px;font-weight:600;color:var(--primary);background:var(--primary-bg);padding:2px 8px;border-radius:20px}
+.sidebar-search{padding:10px 14px;border-bottom:1px solid var(--border)}.search-input{width:100%;padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;background:var(--surface);outline:none}.search-input:focus{border-color:var(--primary);background:var(--white)}
+.sidebar-scroll{flex:1;overflow-y:auto;padding:6px}.domain-header{padding:6px 10px;font-size:10px;font-weight:600;text-transform:uppercase;letter-spacing:.05em;color:var(--dim)}
+.contract-row{padding:8px 10px;border-radius:var(--radius);cursor:pointer;border:1px solid transparent;margin-bottom:1px}.contract-row:hover{background:var(--surface);border-color:var(--border)}.contract-row.active{background:var(--primary-bg);border-color:rgba(99,102,241,.2)}
+.contract-row-name{font-size:12px;font-weight:500}.contract-row.active .contract-row-name{color:var(--primary)}.contract-row-meta{display:flex;align-items:center;gap:5px;margin-top:3px}
+.main{flex:1;overflow-y:auto}.main-inner{max-width:1100px;margin:0 auto;padding:24px 28px 60px}
+.badge{display:inline-flex;align-items:center;font-size:10px;font-weight:500;padding:2px 8px;border-radius:20px}.badge.development{background:var(--amber-bg);color:var(--amber)}.badge.active{background:var(--green-bg);color:var(--green)}.badge.version{background:var(--blue-bg);color:var(--blue)}.badge.pk{background:var(--amber-bg);color:var(--amber);font-family:var(--mono);font-size:9px;padding:1px 5px}.badge.type-badge{background:var(--primary-bg);color:var(--primary);font-family:var(--mono);font-size:10px;padding:2px 6px}.badge.odcs{background:var(--blue-bg);color:var(--blue)}.badge.layer{background:#f3e8ff;color:var(--purple)}
+.tag{display:inline-block;font-size:10px;padding:2px 7px;background:var(--surface);border:1px solid var(--border);border-radius:4px;color:var(--muted);margin:2px}
+.breadcrumb{display:flex;align-items:center;gap:5px;font-size:12px;margin-bottom:14px;color:var(--muted)}.breadcrumb .current{color:var(--text);font-weight:500}
+.contract-title{font-size:22px;font-weight:700}.contract-subtitle{font-size:13px;color:var(--muted);margin-top:2px;display:flex;align-items:center;gap:6px;flex-wrap:wrap}
+.btn{padding:7px 14px;border-radius:var(--radius);font-size:12px;font-weight:500;cursor:pointer;border:1px solid var(--border);background:var(--white);color:var(--text2);display:flex;align-items:center;gap:5px;box-shadow:var(--shadow)}.btn:hover{background:var(--surface)}.btn-green{background:var(--green);color:#fff;border-color:var(--green)}
+.erd-card{display:inline-block;border:2px solid var(--primary);border-radius:var(--radius);overflow:hidden;min-width:220px;margin-bottom:20px}.erd-header{background:var(--primary);color:#fff;padding:7px 12px;font-size:12px;font-weight:600}.erd-row{display:flex;justify-content:space-between;padding:5px 12px;font-size:11px;border-bottom:1px solid var(--border)}.erd-row:last-child{border-bottom:none}.erd-col{font-family:var(--mono);color:var(--text2)}.erd-type{font-family:var(--mono);color:var(--muted);font-size:10px}
+.section{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);margin-bottom:16px;box-shadow:var(--shadow);overflow:hidden}.section-head{padding:14px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between}.section-title{font-size:14px;font-weight:600}.section-sub{font-size:11px;color:var(--muted)}.section-body{padding:16px 18px}
+.fund-grid{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}.fund-label{font-size:11px;font-weight:500;color:var(--muted);margin-bottom:3px}.fund-value{font-size:13px;font-weight:500}
+.schema-table{width:100%;border-collapse:collapse;font-size:12px}.schema-table th{text-align:left;padding:8px 14px;font-size:10px;font-weight:600;color:var(--muted);text-transform:uppercase;border-bottom:1px solid var(--border);background:var(--surface)}.schema-table td{padding:10px 14px;border-bottom:1px solid rgba(0,0,0,.04);vertical-align:top}.schema-table tr:hover td{background:rgba(99,102,241,.02)}
+.col-name{font-family:var(--mono);font-size:11px;font-weight:500}
+.quality-row{display:flex;align-items:flex-start;gap:10px;padding:10px 0;border-bottom:1px solid rgba(0,0,0,.04)}.quality-row:last-child{border-bottom:none}.q-type{font-family:var(--mono);font-size:10px;font-weight:600;padding:2px 7px;border-radius:4px;flex-shrink:0}.q-type.not_null{background:var(--green-bg);color:var(--green)}.q-type.unique{background:var(--primary-bg);color:var(--primary)}.q-type.accepted_values{background:var(--amber-bg);color:var(--amber)}.q-prop{font-family:var(--mono);font-size:11px;font-weight:500}.q-desc{font-size:11px;color:var(--muted);margin-top:1px}.severity{font-size:9px;font-weight:600;margin-left:auto;padding:2px 6px;border-radius:4px}.severity.error{background:var(--red-bg);color:var(--red)}
+.rel-row{display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,.04);font-family:var(--mono);font-size:11px}.rel-row:last-child{border-bottom:none}.rel-from{color:var(--primary);font-weight:500}.rel-arrow{color:var(--dim)}.rel-to{color:var(--green);font-weight:500}
+.team-row{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid rgba(0,0,0,.04)}.team-row:last-child{border-bottom:none}.team-avatar{width:28px;height:28px;border-radius:50%;background:var(--primary-bg);color:var(--primary);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;flex-shrink:0}.team-name{font-size:12px;font-weight:500}.team-role{font-size:11px;color:var(--muted)}
+.yaml-editor{width:100%;min-height:400px;font-family:var(--mono);font-size:12px;line-height:1.7;padding:16px;border:1px solid var(--border);border-radius:var(--radius);background:var(--surface);resize:vertical;outline:none}.yaml-editor:focus{border-color:var(--primary)}
+.yaml-viewer{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);padding:16px;font-family:var(--mono);font-size:11px;line-height:1.7;white-space:pre-wrap;max-height:500px;overflow-y:auto}
+.upload-page{max-width:620px;margin:0 auto;padding:32px 0}.upload-title{font-size:22px;font-weight:700;margin-bottom:4px}.upload-sub{color:var(--muted);font-size:13px;margin-bottom:28px}
+.drop-zone{border:2px dashed var(--border2);border-radius:var(--radius-lg);padding:48px 28px;text-align:center;cursor:pointer;background:var(--white)}.drop-zone:hover,.drop-zone.drag-over{border-color:var(--primary);background:var(--primary-bg)}.drop-icon{font-size:36px;margin-bottom:10px}.drop-text{font-size:14px;font-weight:500;margin-bottom:4px}.drop-hint{font-size:11px;color:var(--dim)}.file-input{display:none}
+.yaml-preview-card{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);margin-top:20px;overflow:hidden;box-shadow:var(--shadow)}.yaml-preview-head{padding:12px 16px;border-bottom:1px solid var(--border);display:flex;align-items:center;justify-content:space-between;background:var(--surface)}.yaml-preview-body{padding:14px 16px;max-height:300px;overflow-y:auto;font-family:var(--mono);font-size:11px;line-height:1.7;white-space:pre-wrap}
+.save-row{display:flex;gap:10px;align-items:flex-end;margin-top:16px;flex-wrap:wrap}.field-group{display:flex;flex-direction:column;gap:3px}.field-group label{font-size:11px;font-weight:500;color:var(--muted)}.field-input{padding:7px 10px;border:1px solid var(--border);border-radius:var(--radius);font-size:12px;width:170px;outline:none}.field-input:focus{border-color:var(--primary)}.save-btn{padding:8px 18px;border-radius:var(--radius);border:none;background:var(--primary);color:#fff;font-size:12px;font-weight:600;cursor:pointer}.save-btn:disabled{opacity:.35}
+.toast{position:fixed;bottom:20px;right:20px;background:var(--white);border:1px solid var(--border);border-radius:var(--radius);padding:10px 16px;font-size:12px;display:flex;align-items:center;gap:6px;z-index:9999;box-shadow:0 4px 6px rgba(0,0,0,.05)}.toast.success{border-left:3px solid var(--green);color:var(--green)}.toast.error{border-left:3px solid var(--red);color:var(--red)}
+.empty{display:flex;flex-direction:column;align-items:center;justify-content:center;padding:80px 40px;text-align:center}.empty-icon{font-size:28px;margin-bottom:12px;opacity:.4}.empty-title{font-size:15px;font-weight:600;margin-bottom:4px}.empty-sub{font-size:12px;color:var(--muted);max-width:320px}
+.spinner{width:16px;height:16px;border:2px solid var(--border);border-top-color:var(--primary);border-radius:50%;animation:spin .6s linear infinite;display:inline-block}@keyframes spin{to{transform:rotate(360deg)}}
+.two-col{display:grid;grid-template-columns:1fr 320px;gap:16px;align-items:start}@media(max-width:900px){.two-col{grid-template-columns:1fr}}
+.src-pill{display:inline-flex;align-items:center;gap:4px;font-family:var(--mono);font-size:11px;padding:4px 10px;border-radius:6px;background:var(--surface);border:1px solid var(--border);margin:3px;color:var(--text2)}
+.src-pill .arrow{color:var(--dim);margin:0 2px}
+.datamap{background:var(--white);border:1px solid var(--border);border-radius:var(--radius-lg);overflow:hidden;box-shadow:var(--shadow)}
+.datamap-toolbar{padding:12px 18px;border-bottom:1px solid var(--border);display:flex;align-items:center;gap:10px}
+.datamap-zoom{display:flex;gap:4px;margin-left:auto}.datamap-zoom button{width:28px;height:28px;border:1px solid var(--border);border-radius:var(--radius);background:var(--white);cursor:pointer;font-size:14px;display:flex;align-items:center;justify-content:center;color:var(--muted)}.datamap-zoom button:hover{background:var(--surface)}
+.datamap-canvas{overflow:auto}
+</style></head><body><div id="root"></div>
+<script type="text/babel">
+const{useState,useEffect,useRef}=React;const B='/api/contracts';
+function Badge({value,type}){return<span className={`badge ${type||(value||'').toLowerCase().replace(/\s+/g,'_')}`}>{value||'—'}</span>}
+function Toast({msg,kind,onClose}){useEffect(()=>{const t=setTimeout(onClose,3e3);return()=>clearTimeout(t)},[]);return<div className={`toast ${kind}`}>{kind==='success'?'✓':'✗'} {msg}</div>}
+function Spin(){return<span className="spinner"/>}
+async function api(u,o={}){const r=await fetch(u,o);if(!r.ok)throw new Error(await r.text());return r.json()}
+
+function UploadPage({onSaved}){
+  const[dr,setDr]=useState(false),[ld,setLd]=useState(false),[res,setRes]=useState(null),[dom,setDom]=useState(''),[ent,setEnt]=useState(''),[ver,setVer]=useState('1.0.0'),[sav,setSav]=useState(false),[toast,setToast]=useState(null);const ref=useRef();
+  async function hf(f){if(!f||!f.name.endsWith('.xlsx'))return;setLd(true);setRes(null);try{const fd=new FormData();fd.append('file',f);const d=await api(`${B}/import`,{method:'POST',body:fd});setRes(d);setDom(d.domain||'');setEnt(d.parsed?.title||f.name.replace('.xlsx',''));setVer(d.parsed?.version||'1.0.0')}catch(e){setToast({msg:e.message,kind:'error'})}finally{setLd(false)}}
+  async function sv(){setSav(true);try{await api(`${B}/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml_text:res.yaml,domain:dom,entity:ent,version:ver})});setToast({msg:'Saved',kind:'success'});onSaved()}catch(e){setToast({msg:e.message,kind:'error'})}finally{setSav(false)}}
+  return(<div className="upload-page"><h1 className="upload-title">Import Data Contract</h1><p className="upload-sub">Upload an ODCS v3 Excel file.</p>
+    <div className={`drop-zone ${dr?'drag-over':''}`} onClick={()=>ref.current.click()} onDragOver={e=>{e.preventDefault();setDr(true)}} onDragLeave={()=>setDr(false)} onDrop={e=>{e.preventDefault();setDr(false);hf(e.dataTransfer.files[0])}}><div className="drop-icon">📄</div><div className="drop-text">{ld?'Processing...':'Drop ODCS Excel here'}</div><div className="drop-hint">{ld?<Spin/>:'or click to browse'}</div></div>
+    <input ref={ref} type="file" accept=".xlsx" className="file-input" onChange={e=>hf(e.target.files[0])}/>
+    {res&&<><div className="yaml-preview-card"><div className="yaml-preview-head"><span style={{fontWeight:600,fontSize:12}}>{res.parsed?.title}</span><div style={{display:'flex',gap:5}}><Badge value={res.parsed?.status}/><span style={{fontSize:10,color:'var(--muted)'}}>{res.parsed?.column_count} cols</span></div></div><div className="yaml-preview-body">{res.yaml}</div></div>
+    <div className="save-row"><div className="field-group"><label>Domain</label><input className="field-input" value={dom} onChange={e=>setDom(e.target.value)}/></div><div className="field-group"><label>Entity</label><input className="field-input" value={ent} onChange={e=>setEnt(e.target.value)}/></div><div className="field-group"><label>Version</label><input className="field-input" value={ver} onChange={e=>setVer(e.target.value)} style={{width:90}}/></div><button className="save-btn" onClick={sv} disabled={sav||!dom||!ent}>{sav?<Spin/>:'Save'}</button></div></>}
+    {toast&&<Toast msg={toast.msg} kind={toast.kind} onClose={()=>setToast(null)}/>}</div>);
+}
+
+function Sidebar({active,onSelect,rk}){
+  const[data,setData]=useState(null),[q,setQ]=useState(''),[ld,setLd]=useState(true);
+  useEffect(()=>{setLd(true);api(B).then(d=>{setData(d);setLd(false)}).catch(()=>setLd(false))},[rk]);
+  return(<div className="sidebar"><div className="sidebar-header"><span className="sidebar-title">Data Contracts</span><span className="sidebar-count">{data?.total||0}</span></div>
+    <div className="sidebar-search"><input className="search-input" placeholder="Search..." value={q} onChange={e=>setQ(e.target.value)}/></div>
+    <div className="sidebar-scroll">{ld&&<div style={{padding:20,textAlign:'center'}}><Spin/></div>}
+    {data?.domains?.map(({domain:d,contracts:cs})=>{const f=cs.filter(c=>!q||c.entity?.toLowerCase().includes(q.toLowerCase()));if(!f.length)return null;return(<div key={d}><div className="domain-header">{d}</div>{f.map(c=>{const k=`${d}/${c.entity}`;return<div key={k} className={`contract-row ${active===k?'active':''}`} onClick={()=>onSelect(d,c.entity)}><div className="contract-row-name">{c.entity}</div><div className="contract-row-meta"><Badge value={c.status}/><Badge value={`v${c.version}`} type="version"/><span style={{fontSize:9,color:'var(--dim)',marginLeft:'auto'}}>{c.column_count} cols</span></div></div>})}</div>)})}</div></div>);
+}
+
+/* ══ DATA MAP ══ */
+function DataMap({rk}){
+  const[contracts,setContracts]=useState(null),[ld,setLd]=useState(true),[zoom,setZoom]=useState(1),[search,setSearch]=useState(''),[selected,setSelected]=useState(null);
+  useEffect(()=>{setLd(true);api(B).then(d=>{const all=[];for(const dom of d.domains||[])for(const c of dom.contracts)all.push({...c,domain:dom.domain});setContracts(all);setLd(false)}).catch(()=>setLd(false))},[rk]);
+  if(ld)return<div style={{padding:60,textAlign:'center'}}><Spin/></div>;
+  if(!contracts?.length)return<div className="empty"><div className="empty-icon">🗺️</div><div className="empty-title">No contracts</div></div>;
+
+  const CAT={'Application':{color:'#6b7280',label:'APPLICATION'},'Data Product Source-Aligned':{color:'#059669',label:'DATA PRODUCT SOURCE-ALIGNED'},'Data Product Consumer-Aligned':{color:'#e74694',label:'DATA PRODUCT CONSUMER-ALIGNED'}};
+  const contractIds=new Set(contracts.map(c=>c.entity));
+
+  // Infer raw source APPLICATION nodes
+  const rawSources=new Set();
+  contracts.forEach(c=>(c.sources||[]).forEach(s=>{if(!contractIds.has(s))rawSources.add(s)}));
+  const appNodes=[...rawSources].sort().map(s=>({id:s,name:s,domain:'raw',owner:'',type:'Application',sources:[],cols:0,status:''}));
+  const contractNodes=contracts.map(c=>({id:c.entity,name:c.entity,domain:c.domain,owner:c.owner||'',type:c.dataProductType||'Data Product Source-Aligned',sources:c.sources||[],cols:c.column_count||0,status:c.status}));
+  const allNodes=[...appNodes,...contractNodes];
+
+  // Edges
+  const edges=[];
+  contractNodes.forEach(n=>{n.sources.forEach(src=>{if(allNodes.find(x=>x.id===src))edges.push({from:src,to:n.id})})});
+
+  // Layout columns
+  const NW=200,NH=56,VGAP=20;
+  const cols={app:[],sa:[],ca:[]};
+  allNodes.forEach(n=>{if(n.type==='Application')cols.app.push(n);else if(n.type.includes('Consumer'))cols.ca.push(n);else cols.sa.push(n)});
+  const COL_X={app:60,sa:340,ca:620};
+  cols.app.forEach((n,i)=>{n.x=COL_X.app;n.y=70+i*(NH+VGAP+14)});
+  cols.sa.forEach((n,i)=>{n.x=COL_X.sa;n.y=70+i*(NH+VGAP+14)});
+  cols.ca.forEach((n,i)=>{n.x=COL_X.ca;n.y=70+i*(NH+VGAP+14)});
+  const maxY=Math.max(20,...allNodes.map(n=>n.y+NH+14))+40;
+  const W=900,H=Math.max(500,maxY);
+
+  const fIds=search?new Set(allNodes.filter(n=>n.name.toLowerCase().includes(search.toLowerCase())).map(n=>n.id)):null;
+
+  // Click selection: find all connected node IDs
+  const connectedIds=selected?new Set([selected,...edges.filter(e=>e.from===selected||e.to===selected).flatMap(e=>[e.from,e.to])]):null;
+  // Combined: search narrows, click highlights within that
+  const isHighlighted=(id)=>{
+    if(fIds&&!fIds.has(id))return false;
+    if(connectedIds&&!connectedIds.has(id))return false;
+    return true;
+  };
+  const isEdgeHighlighted=(e)=>{
+    if(fIds&&!fIds.has(e.from)&&!fIds.has(e.to))return false;
+    if(connectedIds&&e.from!==selected&&e.to!==selected)return false;
+    return true;
+  };
+
+  return(<div className="main-inner">
+    <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700}}>Data Map</h1><p style={{color:'var(--muted)',fontSize:13,marginTop:2}}>Explore how data flows through your organization.</p></div>
+    <div className="datamap">
+      <div className="datamap-toolbar"><input className="search-input" placeholder="Search entities..." value={search} onChange={e=>setSearch(e.target.value)} style={{maxWidth:220}}/>
+        <div className="datamap-zoom"><button onClick={()=>setZoom(z=>Math.min(z+.15,2))}>+</button><button onClick={()=>setZoom(z=>Math.max(z-.15,.4))}>−</button><button onClick={()=>setZoom(1)} style={{width:'auto',padding:'0 8px',fontSize:11}}>1:1</button></div></div>
+      <div className="datamap-canvas"><svg width={W*zoom} height={H*zoom} viewBox={`0 0 ${W} ${H}`} style={{display:'block'}} onClick={()=>setSelected(null)}>
+        {/* Click background to deselect */}
+        <rect x="0" y="0" width={W} height={H} fill="transparent"/>
+
+        {/* Column labels */}
+        <text x={COL_X.app+NW/2} y={28} textAnchor="middle" fill="var(--muted)" fontSize="11" fontWeight="600" style={{letterSpacing:'.06em'}}>SOURCES</text>
+        <text x={COL_X.sa+NW/2} y={28} textAnchor="middle" fill="var(--muted)" fontSize="11" fontWeight="600" style={{letterSpacing:'.06em'}}>SOURCE-ALIGNED</text>
+        <text x={COL_X.ca+NW/2} y={28} textAnchor="middle" fill="var(--muted)" fontSize="11" fontWeight="600" style={{letterSpacing:'.06em'}}>CONSUMER-ALIGNED</text>
+        <line x1={40} y1={44} x2={W-40} y2={44} stroke="var(--border)" strokeWidth=".5"/>
+
+        {/* Edges — bezier curves */}
+        {edges.map((e,i)=>{const f=allNodes.find(n=>n.id===e.from),t=allNodes.find(n=>n.id===e.to);if(!f||!t)return null;
+          const hi=isEdgeHighlighted(e);const isSelected=selected&&(e.from===selected||e.to===selected);
+          const x1=f.x+NW,y1=f.y+NH/2+14,x2=t.x,y2=t.y+NH/2+14,dx=Math.abs(x2-x1)*.5;
+          return<path key={i} d={`M${x1} ${y1} C${x1+dx} ${y1} ${x2-dx} ${y2} ${x2} ${y2}`} fill="none" stroke={isSelected?'#6366f1':hi?'#94a3b8':'var(--border)'} strokeWidth={isSelected?2.5:hi?1.5:.8} opacity={hi?1:.2}/>})}
+
+        {/* Nodes */}
+        {allNodes.map(n=>{const cat=CAT[n.type]||CAT.Application;const hi=isHighlighted(n.id);const isSel=selected===n.id;
+          return(<g key={n.id} opacity={hi?1:.15} style={{cursor:'pointer',transition:'opacity 0.2s'}} onClick={e=>{e.stopPropagation();setSelected(selected===n.id?null:n.id)}}>
+            {/* Category label bar */}
+            <rect x={n.x} y={n.y} width={NW} height={14} rx={4} ry={4} fill={cat.color}/>
+            <text x={n.x+NW/2} y={n.y+10} textAnchor="middle" fill="#fff" fontSize="7.5" fontWeight="700" style={{letterSpacing:'.05em'}}>{cat.label}</text>
+            {/* Card body */}
+            <rect x={n.x} y={n.y+14} width={NW} height={NH} rx={0} ry={0} fill="var(--white)" stroke={isSel?'#6366f1':cat.color} strokeWidth={isSel?3:1.5}/>
+            {isSel&&<rect x={n.x-3} y={n.y-3} width={NW+6} height={NH+14+6} rx={6} fill="none" stroke="#6366f1" strokeWidth="2" strokeDasharray="4,2" opacity=".5"/>}
+            <rect x={n.x} y={n.y+14+NH-1} width={NW} height={1} fill={cat.color} opacity=".3"/>
+            {/* Bottom rounded corners */}
+            <rect x={n.x} y={n.y+14+NH-4} width={NW} height={5} rx={4} fill="var(--white)" stroke={cat.color} strokeWidth="1.5"/>
+            <rect x={n.x+1} y={n.y+14+NH-5} width={NW-2} height={4} fill="var(--white)"/>
+            {/* Icon + name */}
+            <circle cx={n.x+16} cy={n.y+14+20} r={5} fill={cat.color} opacity=".2"/>
+            <circle cx={n.x+16} cy={n.y+14+20} r={3} fill={cat.color}/>
+            <text x={n.x+28} y={n.y+14+24} fontSize="12" fontWeight="600" fill="var(--text)">{n.name}</text>
+            {/* Subtitle */}
+            <text x={n.x+12} y={n.y+14+42} fontSize="9" fill="var(--muted)">{n.owner||n.domain}{n.cols>0?` · ${n.cols} cols`:''}</text>
+            {/* Domain badge */}
+            <text x={n.x+NW-10} y={n.y+14+42} textAnchor="end" fontSize="8" fill={cat.color} fontWeight="600">{n.domain.slice(0,10)}</text>
+          </g>)})}
+      </svg></div></div></div>);
+}
+
+/* ══ DETAIL ══ */
+function Detail({domain,entity,onSaved}){
+  const[d,setD]=useState(null),[ld,setLd]=useState(true),[tab,setTab]=useState('schema'),[editing,setEditing]=useState(false),[yamlText,setYamlText]=useState(''),[saving,setSaving]=useState(false),[toast,setToast]=useState(null);
+  useEffect(()=>{if(!domain||!entity)return;setLd(true);setTab('schema');setEditing(false);api(`${B}/${domain}/${entity}`).then(r=>{setD(r);setYamlText(r.yaml_text||'');setLd(false)}).catch(()=>setLd(false))},[domain,entity]);
+  async function saveYaml(){setSaving(true);try{await api(`${B}/save`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({yaml_text:yamlText,domain,entity,version:d?.version||'1.0.0'})});setToast({msg:'Saved',kind:'success'});setEditing(false);onSaved()}catch(e){setToast({msg:e.message,kind:'error'})}finally{setSaving(false)}}
+  if(ld)return<div className="main"><div style={{padding:60,textAlign:'center'}}><Spin/></div></div>;
+  if(!d)return null;
+  const info=d.info||{},cols=d.columns||[],sources=d.sources||[];
+  let allQ=[...(d.quality||[])];cols.forEach(c=>(c.quality||[]).forEach(q=>allQ.push({...q,property:q.property||c.name})));
+  const rels=d.relationships||[],team=d.team||[];
+
+  return(<div className="main"><div className="main-inner">
+    <div className="breadcrumb"><span>🏠</span><span className="sep">›</span><span>{domain}</span><span className="sep">›</span><span className="current">{entity}</span></div>
+    {/* Server info helper */}
+    {(()=>{const sv=d.servers?.[0]||{};window._sv=sv;return null})()}
+    <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
+      <div><div className="contract-title">Data Contract</div><div className="contract-subtitle"><span>{d.id||entity}</span><Badge value={`v${d.version}`} type="version"/><Badge value={`ODCS ${d.apiVersion||'v3.0.2'}`} type="odcs"/>{d.layer&&<Badge value={d.layer} type="layer"/>}{d.dataProductType&&<Badge value={d.dataProductType} type={d.dataProductType.includes('Consumer')?'development':'active'}/>}{d.servers?.[0]?.project&&<span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--muted)',background:'var(--surface)',padding:'2px 8px',borderRadius:12,border:'1px solid var(--border)'}}>🗄️ {d.servers[0].project}.{d.servers[0].dataset}</span>}</div></div>
+      <div style={{display:'flex',gap:6}}>{!editing&&<button className="btn" onClick={()=>{setTab('yaml');setEditing(true)}}>✏️ Edit YAML</button>}{editing&&<><button className="btn btn-green" onClick={saveYaml} disabled={saving}>{saving?<Spin/>:'💾 Save'}</button><button className="btn" onClick={()=>setEditing(false)}>Cancel</button></>}</div>
+    </div>
+
+    {/* ERD + Sources side by side */}
+    <div style={{display:'flex',gap:20,flexWrap:'wrap',marginBottom:20}}>
+      <div className="erd-card"><div className="erd-header">📊 {entity}</div>{cols.map(c=><div key={c.name} className="erd-row"><span className="erd-col">{c.primaryKey?'🔑 ':''}{c.name}</span><span className="erd-type">{c.logicalType}</span></div>)}</div>
+      {sources.length>0&&<div className="section" style={{flex:1,minWidth:280,marginBottom:0}}><div className="section-head"><span className="section-title">Sources</span><span className="section-sub">{sources.length} upstream</span></div><div className="section-body"><div style={{display:'flex',flexWrap:'wrap',gap:4}}>
+        {sources.map(s=><span key={s} className="src-pill"><span className="arrow">←</span>{s}</span>)}
+      </div><div style={{marginTop:12,fontSize:11,color:'var(--muted)'}}>This entity reads from the above source tables and models.</div></div></div>}
+    </div>
+
+    <div className="two-col"><div>
+      <div className="section"><div className="section-head"><span className="section-title">Fundamentals</span></div><div className="section-body"><div className="fund-grid">
+        <div><div className="fund-label">Version</div><div className="fund-value">{d.version}</div></div>
+        <div><div className="fund-label">Status</div><div className="fund-value"><Badge value={d.status}/></div></div>
+        <div><div className="fund-label">Domain</div><div className="fund-value">{d.domain}</div></div>
+        <div><div className="fund-label">Purpose</div><div className="fund-value">{info.purpose||'—'}</div></div>
+        <div><div className="fund-label">Owner</div><div className="fund-value">{info.owner||'—'}</div></div>
+        <div><div className="fund-label">Data Product</div><div className="fund-value">{d.dataProduct||'—'}</div></div>
+        {d.servers?.[0]?.project&&<div><div className="fund-label">BigQuery Project</div><div className="fund-value" style={{fontFamily:'var(--mono)',fontSize:11}}>{d.servers[0].project}</div></div>}
+        {d.servers?.[0]?.dataset&&<div><div className="fund-label">BigQuery Dataset</div><div className="fund-value" style={{fontFamily:'var(--mono)',fontSize:11}}>{d.servers[0].dataset}</div></div>}
+        {d.servers?.[0]?.type&&!d.servers?.[0]?.project&&<div><div className="fund-label">Server Type</div><div className="fund-value">{d.servers[0].type}</div></div>}
+      </div>{(d.tags||[]).length>0&&<div style={{marginTop:10}}>{d.tags.map(t=><span key={t} className="tag">{t}</span>)}</div>}</div></div>
+
+      {tab!=='yaml'&&<div className="section"><div className="section-head"><span className="section-title">Schema</span><span className="section-sub">{cols.length} cols</span></div>
+        <div style={{overflowX:'auto'}}><table className="schema-table"><thead><tr><th>Property</th><th>Type</th><th>Description</th><th>Req</th><th>Transform</th></tr></thead><tbody>
+        {cols.map(c=><tr key={c.name}><td><span className="col-name">{c.name}</span>{c.primaryKey&&<span className="badge pk">PK</span>}{c.businessName&&<div style={{fontSize:10,color:'var(--dim)'}}>{c.businessName}</div>}</td>
+          <td><span className="badge type-badge">{c.logicalType}</span><div style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--dim)',marginTop:2}}>{c.physicalType}</div></td>
+          <td style={{fontSize:11,maxWidth:200}}>{c.description||'—'}{c.examples?.length>0&&<div style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--dim)'}}>e.g. {c.examples.join(', ')}</div>}</td>
+          <td style={{textAlign:'center'}}>{c.required?<span style={{color:'var(--green)',fontWeight:600}}>✓</span>:'—'}</td>
+          <td>{c.transformLogic?<div style={{fontFamily:'var(--mono)',fontSize:9,color:'var(--muted)',maxWidth:180,overflow:'hidden',textOverflow:'ellipsis',whiteSpace:'nowrap'}} title={c.transformLogic}>{c.transformLogic}</div>:'—'}</td></tr>)}
+        </tbody></table></div></div>}
+
+      {tab!=='yaml'&&allQ.length>0&&<div className="section"><div className="section-head"><span className="section-title">Quality</span><span className="section-sub">{allQ.length}</span></div><div className="section-body">
+        {allQ.map((q,i)=><div key={i} className="quality-row"><span className={`q-type ${(q.type||'').replace(/\s/g,'_')}`}>{q.type}</span><div style={{flex:1}}><div className="q-prop">{q.property}</div>{q.description&&<div className="q-desc">{q.description}</div>}</div><span className={`severity ${q.severity||'error'}`}>{q.severity||'error'}</span></div>)}
+      </div></div>}
+
+      {tab==='yaml'&&<div className="section"><div className="section-head"><span className="section-title">{editing?'Edit YAML':'YAML'}</span></div>
+        <div className="section-body" style={{padding:editing?16:0}}>{editing?<textarea className="yaml-editor" value={yamlText} onChange={e=>setYamlText(e.target.value)}/>:<pre className="yaml-viewer">{d.yaml_text}</pre>}</div></div>}
+    </div>
+    <div>
+      {rels.length>0&&<div className="section"><div className="section-head"><span className="section-title">Relationships</span></div><div className="section-body">{rels.map((r,i)=><div key={i} className="rel-row"><span className="rel-from">{r.from}</span><span className="rel-arrow">→</span><span className="rel-to">{r.to}</span></div>)}</div></div>}
+      {team.length>0&&<div className="section"><div className="section-head"><span className="section-title">Team</span></div><div className="section-body">{team.map((t,i)=><div key={i} className="team-row"><div className="team-avatar">{(t.name||t.username||'?')[0].toUpperCase()}</div><div><div className="team-name">{t.name||t.username}</div><div className="team-role">{t.role}</div></div></div>)}</div></div>}
+      {d.servers?.length>0&&<div className="section"><div className="section-head"><span className="section-title">Infrastructure</span></div><div className="section-body">{d.servers.map((s,i)=><div key={i}><div style={{marginBottom:6}}><div className="fund-label">Type</div><div className="fund-value">{s.type}</div></div>{s.project&&<div style={{marginBottom:6}}><div className="fund-label">Project</div><div className="fund-value" style={{fontFamily:'var(--mono)',fontSize:11}}>{s.project}</div></div>}{s.dataset&&<div><div className="fund-label">Dataset</div><div className="fund-value" style={{fontFamily:'var(--mono)',fontSize:11}}>{s.dataset}</div></div>}</div>)}</div></div>}
+      <div className="section"><div className="section-head"><span className="section-title">View</span></div><div className="section-body" style={{display:'flex',flexDirection:'column',gap:4}}>
+        {['schema','yaml'].map(t=><div key={t} style={{padding:'6px 10px',borderRadius:6,cursor:'pointer',fontSize:12,fontWeight:tab===t?600:400,color:tab===t?'var(--primary)':'var(--muted)',background:tab===t?'var(--primary-bg)':'transparent'}} onClick={()=>{setTab(t);if(t!=='yaml')setEditing(false)}}>{t==='schema'?'📋 Schema & Quality':'📝 YAML'}</div>)}
+      </div></div>
+    </div></div>
+    {toast&&<Toast msg={toast.msg} kind={toast.kind} onClose={()=>setToast(null)}/>}
+  </div></div>);
+}
+
+function App(){
+  const[page,setPage]=useState('contracts'),[sel,setSel]=useState(null),[rk,setRk]=useState(0);
+  return(<><div className="topnav"><div className="logo"><div className="logo-icon"><svg viewBox="0 0 16 16" fill="none"><rect x="2" y="2" width="12" height="12" rx="2" stroke="#fff" strokeWidth="1.5"/><line x1="2" y1="6.5" x2="14" y2="6.5" stroke="#fff" strokeWidth=".8"/><line x1="6.5" y1="6.5" x2="6.5" y2="14" stroke="#fff" strokeWidth=".8"/></svg></div><span className="logo-text">Data Contract Manager</span></div>
+    <div className="nav-tabs"><button className={`nav-tab ${page==='contracts'?'active':''}`} onClick={()=>setPage('contracts')}>Data Contracts</button><button className={`nav-tab ${page==='map'?'active':''}`} onClick={()=>setPage('map')}>Data Map</button><button className={`nav-tab ${page==='upload'?'active':''}`} onClick={()=>setPage('upload')}>+ Import</button></div>
+    <div className="nav-right"><div className="avatar">NR</div></div></div>
+    <div className="layout">
+      {page==='contracts'&&<><Sidebar active={sel?`${sel.domain}/${sel.entity}`:null} onSelect={(d,e)=>{setSel({domain:d,entity:e});setPage('contracts')}} rk={rk}/>
+        {sel?<Detail domain={sel.domain} entity={sel.entity} onSaved={()=>setRk(k=>k+1)}/>:<div className="main"><div className="empty"><div className="empty-icon">📋</div><div className="empty-title">Select a contract</div><div className="empty-sub">Choose from the sidebar or import an ODCS Excel.</div></div></div>}</>}
+      {page==='map'&&<div className="main"><DataMap rk={rk}/></div>}
+      {page==='upload'&&<div className="main"><div className="main-inner"><UploadPage onSaved={()=>{setRk(k=>k+1);setPage('contracts')}}/></div></div>}
+    </div></>);
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script></body></html>

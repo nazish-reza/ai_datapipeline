@@ -21,6 +21,8 @@ services:
     image: airflow-dbt_b57794-fastapi:latest
     ports:
       - "8001:8001"
+    volumes:
+      - /Users/nazishreza/Developer/DataEngneering/ai-datapipeline/contracts:/app/contracts
       
   mcp:
     image: airflow-dbt_b57794-mcp:latest

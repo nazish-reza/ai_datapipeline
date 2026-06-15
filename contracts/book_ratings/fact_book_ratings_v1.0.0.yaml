@@ -1,0 +1,130 @@
+version: 1.0.0
+kind: DataContract
+apiVersion: v3.0.2
+id: book_ratings.fact_book_ratings
+name: fact_book_ratings
+tags:
+- ratings
+- fact
+- books
+status: development
+servers:
+- server: production
+  type: BigQuery
+  description: BigQuery dataset for book_ratings
+  environment: production
+  project: genuine-arena-458814-u7
+  dataset: books_mart
+dataProduct: fact_book_ratings
+description:
+  purpose: Rating analysis and reporting.
+domain: book_ratings
+schema:
+- name: fact_book_ratings
+  physicalType: table
+  description: Fact table of individual book ratings with derived category.
+  tags:
+  - ratings
+  - fact
+  - books
+  logicalType: object
+  physicalName: fact_book_ratings
+  properties:
+  - name: rating_id
+    physicalType: INT64
+    description: Primary key via row_number().
+    businessName: Rating ID
+    primaryKey: true
+    primaryKeyPosition: 1
+    logicalType: integer
+    required: true
+    unique: true
+    transformSourceObjects:
+    - ratings
+    transformDescription: Surrogate key
+    examples:
+    - '1'
+  - name: user_id
+    physicalType: INT64
+    description: FK to dim_users. User who rated.
+    businessName: User ID
+    primaryKey: false
+    logicalType: integer
+    required: true
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: FK cast to int
+    examples:
+    - '12345'
+  - name: book_id
+    physicalType: STRING
+    description: FK to dim_books. Book that was rated.
+    businessName: Book ID
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: FK cast to string
+    examples:
+    - 019283
+  - name: rating
+    physicalType: INT64
+    description: Raw book rating value (0–10).
+    businessName: Rating
+    primaryKey: false
+    logicalType: integer
+    required: true
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: Direct reference
+    examples:
+    - '8'
+  - name: rating_category
+    physicalType: STRING
+    description: Derived rating bucket.
+    businessName: Rating Category
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: Rating segmentation
+    examples:
+    - High
+  - name: rating_date
+    physicalType: TIMESTAMP
+    description: Timestamp when the rating record was loaded.
+    businessName: Rating Date
+    primaryKey: false
+    logicalType: timestamp
+    required: true
+    unique: false
+    transformSourceObjects:
+    - derived
+    transformDescription: Load timestamp
+team:
+- username: nazish-reza
+  name: Nazish Reza
+  description: Data Engineer
+  role: owner
+  dateIn: '2025-01-01'
+customProperties:
+- property: owner
+  value: nazish-reza
+- property: layer
+  value: marts
+- property: data_product_type
+  value: consumer-aligned
+- property: upstream_entities
+  value: dim_users, dim_books, ratings
+- property: team_name
+  value: Analytics
+- property: dataProductType
+  value: Data Product Consumer-Aligned
+- property: sources
+  value: dim_users,dim_books,ratings
