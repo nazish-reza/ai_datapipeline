@@ -1,266 +1,152 @@
 """
-generate_dbt_models.py  (v2 — registry-based)
-─────────────────────────────────────────────
-Generates dbt SQL + YML from mapping sheets with persistent memory.
+generate_dbt_models.py  (v3 — contract-based)
+──────────────────────────────────────────────
+Reads ODCS YAML contracts from contracts/ and generates dbt SQL + YML.
 
-Key features:
-  1. SKILL        — skills/dbt_skill.md injected into every prompt (house style)
-  2. REGISTRY     — dbt/registry.json remembers every entity ever generated:
-                    layer, file, mapping hash, inputs, output columns.
-  3. SKIP         — unchanged mapping hash → no LLM call at all
-  4. UPDATE MODE  — changed mapping → LLM gets the PREVIOUS SQL and is asked
-                    to surgically update it, not regenerate from scratch
-  5. CROSS-RUN REFS — a new entity whose input is a model built in a past
-                    run (even from a different mapping file) gets ref()'d
-                    with its known output columns
-  6. LAYERS       — optional "Layer" column in the sheet wins; otherwise the
-                    layer is inferred from dependencies (no prefix sniffing)
-  7. SOURCES.YML  — registry-managed; regenerated only when new raw tables
-                    appear, always containing the full known set
+Features:
+  1. SKILL        — skills/dbt_skill.md injected into every prompt
+  2. REGISTRY     — dbt/registry.json persistent memory across runs
+  3. SKIP         — unchanged contract hash → no LLM call
+  4. UPDATE MODE  — changed contract → previous SQL + new mapping → surgical edits
+  5. CROSS-RUN REFS — entity referencing a model from a past run gets ref()
+  6. DOMAIN FOLDERS — dbt/models/<domain>/<layer>/<entity>.sql
+  7. SOURCES.YML  — registry-managed, regenerated on new raw tables
+  8. TOPO SORT    — dependencies built before dependents
+
+Usage:
+    # Process only changed contracts (GitHub Actions)
+    CHANGED_FILES="contracts/book_catalog/dim_books_v1.0.0.yaml" python scripts/generate_dbt_models.py
+
+    # Process all contracts (local)
+    python scripts/generate_dbt_models.py
 """
 
 import requests
 import json
 import os
+import sys
 import time
 import hashlib
 import datetime
-import pandas as pd
+import yaml
 from pathlib import Path
 from collections import defaultdict
 from requests.exceptions import ChunkedEncodingError, ConnectionError, Timeout, RequestException
 
 # ── Config ────────────────────────────────────────────────────────────
-INVOKE_URL          = os.environ.get("INVOKE_URL", "https://integrate.api.nvidia.com/v1/chat/completions")
-API_KEY             = os.environ.get("API_KEY", "")
-MAPPING_DIR         = Path("mapping")
-DBT_MODELS_DIR      = Path("dbt/models/bigquery")
-REGISTRY_PATH       = Path("dbt/registry.json")
-SKILL_PATH          = Path("skills/dbt_skill.md")
-DELAY_BETWEEN_CALLS = 20
-MAX_RETRIES         = 5
-TIMEOUT             = (10, 300)
+INVOKE_URL   = os.environ.get("INVOKE_URL", "https://integrate.api.nvidia.com/v1/chat/completions")
+API_KEY      = os.environ.get("API_KEY", "")
+CONTRACTS_DIR= Path("contracts")
+DBT_DIR      = Path("dbt/models")
+REGISTRY     = Path("dbt/registry.json")
+SKILL_PATH   = Path("skills/dbt_skill.md")
+DELAY        = 20
+MAX_RETRIES  = 5
+TIMEOUT      = (10, 300)
+NULLISH      = {"nan", "none", "n/a", "na", "derived", ""}
 
-HEADERS = {
-    "Authorization": f"Bearer {API_KEY}",
-    "Accept": "text/event-stream"
-}
-
-NULLISH = ("nan", "derived", "n/a", "na", "none", "")
+HEADERS = {"Authorization": f"Bearer {API_KEY}", "Accept": "text/event-stream"}
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Registry — persistent memory across runs (committed to git)
+# Registry — persistent memory (committed to git)
 # ─────────────────────────────────────────────────────────────────────
-def load_registry() -> dict:
-    if REGISTRY_PATH.exists():
-        reg = json.loads(REGISTRY_PATH.read_text())
+def load_registry():
+    if REGISTRY.exists():
+        r = json.loads(REGISTRY.read_text())
     else:
-        reg = {}
-    reg.setdefault("entities", {})
-    reg.setdefault("raw_tables", {})
-    return reg
+        r = {}
+    r.setdefault("entities", {})
+    r.setdefault("raw_tables", {})
+    return r
 
 
-def save_registry(reg: dict):
-    REGISTRY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    REGISTRY_PATH.write_text(json.dumps(reg, indent=2, sort_keys=True))
-    print(f"Registry saved: {REGISTRY_PATH}")
+def save_registry(reg):
+    REGISTRY.parent.mkdir(parents=True, exist_ok=True)
+    REGISTRY.write_text(json.dumps(reg, indent=2, sort_keys=True))
+    print(f"  Registry saved → {REGISTRY}")
 
 
-def load_skill() -> str:
+def load_skill():
     if SKILL_PATH.exists():
         return SKILL_PATH.read_text()
-    print(f"WARNING: skill file not found at {SKILL_PATH} — proceeding without it")
+    print(f"  WARNING: skill not found at {SKILL_PATH}")
     return ""
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Mapping sheet parsing
+# Contract YAML parsing
 # ─────────────────────────────────────────────────────────────────────
-def find_col(df: pd.DataFrame, *keywords) -> str | None:
-    """Find first column whose name contains ALL keywords (case-insensitive)."""
-    for c in df.columns:
-        cl = c.lower()
-        if all(k in cl for k in keywords):
-            return c
-    return None
+def get_custom(data, key):
+    """Read a value from customProperties list."""
+    for cp in data.get("customProperties", []):
+        if isinstance(cp, dict) and cp.get("property") == key:
+            v = cp.get("value", "")
+            if isinstance(v, str) and v.startswith("="):
+                return ""
+            return str(v).strip() if v else ""
+    return ""
 
 
-def sheet_hash(df: pd.DataFrame) -> str:
-    """Stable content fingerprint of a mapping sheet."""
-    normalized = df.fillna("").astype(str).to_csv(index=False)
-    return hashlib.sha256(normalized.encode()).hexdigest()[:16]
+def parse_contract(path):
+    """Parse a contract YAML into a dict with all fields needed for generation."""
+    data = yaml.safe_load(path.read_text()) or {}
+    schema = data.get("schema", [])
+    cols = schema[0].get("properties", schema[0].get("columns", [])) if schema else []
 
+    entity = data.get("name", path.stem.split("_v")[0])
+    domain = data.get("domain", "default")
 
-def parse_mapping_file(mapping_file: Path) -> dict:
-    """
-    Parse every sheet into:
-      { entity_name: {
-          df, hash, mapping_text,
-          inputs: set of lowercase source-table values,
-          target_columns: [...],
-          layer_override: str | None
-      }}
-    """
-    xl = pd.ExcelFile(mapping_file)
-    entities = {}
+    # Sources from customProperties
+    src_str = get_custom(data, "sources") or get_custom(data, "upstream_entities")
+    sources = [s.strip() for s in src_str.split(",") if s.strip()] if src_str else []
 
-    for sheet in xl.sheet_names:
-        name = sheet.strip()
-        df = xl.parse(sheet)
-
-        src_col   = find_col(df, "source", "table")
-        tgt_col   = find_col(df, "target", "column") or find_col(df, "column")
-        layer_col = find_col(df, "layer")
-
-        inputs = set()
-        if src_col:
-            inputs = {
-                str(v).strip().lower()
-                for v in df[src_col].dropna().unique()
-                if str(v).strip().lower() not in NULLISH
-            }
-
-        target_columns = []
-        if tgt_col:
-            target_columns = [
-                str(v).strip()
-                for v in df[tgt_col].dropna()
-                if str(v).strip().lower() not in NULLISH
-            ]
-
-        layer_override = None
-        if layer_col:
-            vals = {
-                str(v).strip().lower()
-                for v in df[layer_col].dropna().unique()
-                if str(v).strip().lower() not in NULLISH
-            }
-            valid = vals & {"staging", "intermediate", "marts"}
-            if valid:
-                layer_override = sorted(valid)[0]
-
-        entities[name] = {
-            "df": df,
-            "hash": sheet_hash(df),
-            "mapping_text": df.to_string(index=False),
-            "inputs": inputs,
-            "target_columns": target_columns,
-            "layer_override": layer_override,
-            "mapping_file": str(mapping_file),
-        }
-
-    return entities
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Input classification: raw table vs model (current run or registry)
-# ─────────────────────────────────────────────────────────────────────
-def classify_inputs(entity_inputs: set, current_entities: dict, registry: dict):
-    """
-    For each input table name, decide:
-      - model in current run        → ref (will exist after this run)
-      - model in registry           → ref (built in a previous run)
-      - otherwise                   → raw source table
-    Returns (raw_inputs: list, ref_inputs: dict {input_name: model_name})
-    """
-    current_lower  = {e.lower(): e for e in current_entities}
-    registry_lower = {e.lower(): e for e in registry["entities"]}
-
-    raw_inputs, ref_inputs = [], {}
-    for inp in sorted(entity_inputs):
-        if inp in current_lower:
-            ref_inputs[inp] = current_lower[inp]
-        elif inp in registry_lower:
-            ref_inputs[inp] = registry_lower[inp]
+    # Layer from customProperties with fallback
+    layer = get_custom(data, "layer")
+    if not layer:
+        n = entity.lower()
+        if n.startswith(("fct_", "fact_")):
+            layer = "marts"
+        elif n.startswith(("int_", "intermediate_")):
+            layer = "intermediate"
         else:
-            raw_inputs.append(inp)
-    return raw_inputs, ref_inputs
+            layer = "staging"
 
+    # Build mapping text from schema columns (for LLM prompt)
+    mapping_lines = ["Target Column | Source Table | Transformation | Description"]
+    mapping_lines.append("-" * 80)
+    for c in cols:
+        src = ""
+        ts = c.get("transformSourceObjects", c.get("transformSources", []))
+        if isinstance(ts, list) and ts:
+            src = ts[0]
+        elif isinstance(ts, str):
+            src = ts
+        tl = c.get("transformLogic", "")
+        mapping_lines.append(
+            f"{c.get('name','')} | {src} | {tl} | {c.get('description','')}"
+        )
 
-# ─────────────────────────────────────────────────────────────────────
-# Layer: override column wins; else dependency inference; registry
-# value is sticky (an entity never silently moves folders)
-# ─────────────────────────────────────────────────────────────────────
-def infer_layers(current_entities: dict, registry: dict) -> dict:
-    """
-    Returns {entity_name: layer}.
+    # Output column names
+    output_columns = [c.get("name", "") for c in cols if c.get("name")]
 
-    Priority:
-      1. Registry (sticky — already assigned in a past run)
-      2. "Layer" column override in the sheet
-      3. Dependency inference:
-         - reads only raw tables                 → staging
-         - reads models, consumed by others      → intermediate
-         - reads models, terminal (no consumers) → marts
-    """
-    layers = {}
-
-    # who consumes whom (within current run + registry refs)
-    consumed_by = defaultdict(set)
-    for name, ent in current_entities.items():
-        _, refs = classify_inputs(ent["inputs"], current_entities, registry)
-        for model in refs.values():
-            consumed_by[model.lower()].add(name)
-
-    for name, ent in current_entities.items():
-        reg_entry = registry["entities"].get(name)
-
-        if reg_entry and reg_entry.get("layer"):
-            layers[name] = reg_entry["layer"]          # sticky
-        elif ent["layer_override"]:
-            layers[name] = ent["layer_override"]       # sheet override
-        else:
-            raw, refs = classify_inputs(ent["inputs"], current_entities, registry)
-            if not refs:
-                layers[name] = "staging"
-            elif consumed_by.get(name.lower()):
-                layers[name] = "intermediate"
-            else:
-                layers[name] = "marts"
-
-    return layers
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Topological sort — dependencies built before dependents.
-# Registry entities count as already satisfied.
-# ─────────────────────────────────────────────────────────────────────
-def topo_sort(current_entities: dict, registry: dict) -> list:
-    names = list(current_entities.keys())
-    name_lower = {n.lower(): n for n in names}
-
-    deps = {}
-    for name, ent in current_entities.items():
-        _, refs = classify_inputs(ent["inputs"], current_entities, registry)
-        # only dependencies that are in THIS run matter for ordering
-        deps[name] = {
-            name_lower[m.lower()]
-            for m in refs.values()
-            if m.lower() in name_lower and m.lower() != name.lower()
-        }
-
-    ordered, placed = [], set()
-    remaining = dict(deps)
-    while remaining:
-        ready = sorted(n for n, d in remaining.items() if d <= placed)
-        if not ready:
-            # cycle — fall back to alphabetical to avoid infinite loop
-            print(f"WARNING: dependency cycle among {list(remaining)} — using alphabetical order")
-            ordered.extend(sorted(remaining))
-            break
-        for n in ready:
-            ordered.append(n)
-            placed.add(n)
-            del remaining[n]
-    return ordered
+    return {
+        "entity":         entity,
+        "domain":         domain,
+        "layer":          layer,
+        "version":        data.get("version", "1.0.0"),
+        "sources":        sources,
+        "output_columns": output_columns,
+        "mapping_text":   "\n".join(mapping_lines),
+        "contract_hash":  hashlib.sha256(path.read_bytes()).hexdigest()[:16],
+        "contract_file":  str(path),
+    }
 
 
 # ─────────────────────────────────────────────────────────────────────
 # LLM call with retry
 # ─────────────────────────────────────────────────────────────────────
-def call_llm(prompt: str) -> str:
+def call_llm(prompt):
     for attempt in range(1, MAX_RETRIES + 1):
         try:
             payload = {
@@ -272,17 +158,22 @@ def call_llm(prompt: str) -> str:
                 "top_p":            1.00,
                 "stream":           True,
             }
-            response = requests.post(INVOKE_URL, headers=HEADERS, json=payload, stream=True, timeout=TIMEOUT)
+
+            response = requests.post(
+                INVOKE_URL, headers=HEADERS, json=payload,
+                stream=True, timeout=TIMEOUT
+            )
 
             if response.status_code == 429:
-                wait = DELAY_BETWEEN_CALLS * attempt
-                print(f"Rate limited. Waiting {wait}s (retry {attempt}/{MAX_RETRIES})...")
+                wait = DELAY * attempt
+                print(f"      Rate limited. Waiting {wait}s (retry {attempt}/{MAX_RETRIES})...")
                 time.sleep(wait)
                 continue
+
             if response.status_code != 200:
                 raise RuntimeError(f"API error {response.status_code}: {response.text}")
 
-            full_answer, chunk_count = "", 0
+            full_answer = ""
             try:
                 for line in response.iter_lines():
                     if not line:
@@ -290,39 +181,35 @@ def call_llm(prompt: str) -> str:
                     decoded = line.decode("utf-8")
                     if decoded.startswith("data: ") and decoded != "data: [DONE]":
                         try:
-                            chunk   = json.loads(decoded[6:])
+                            chunk = json.loads(decoded[6:])
                             choices = chunk.get("choices", [])
                             if not choices:
                                 continue
                             delta = choices[0].get("delta", {})
                             if delta.get("content"):
                                 full_answer += delta["content"]
-                                chunk_count += 1
-                                if chunk_count % 20 == 0:
-                                    print(f"      Receiving... ({len(full_answer)} chars)")
                         except json.JSONDecodeError:
                             pass
-            except ChunkedEncodingError as e:
-                print(f"Stream cut off after {len(full_answer)} chars (attempt {attempt}/{MAX_RETRIES}): {e}")
+            except ChunkedEncodingError:
                 if attempt < MAX_RETRIES:
-                    time.sleep(DELAY_BETWEEN_CALLS * attempt)
+                    time.sleep(DELAY * attempt)
                     continue
                 raise
 
             if len(full_answer) < 10:
-                print(f"Response too short ({len(full_answer)} chars). Retrying...")
-                time.sleep(DELAY_BETWEEN_CALLS)
+                print(f"      Response too short. Retrying...")
+                time.sleep(DELAY)
                 continue
 
-            print(f"Got {len(full_answer)} chars")
+            print(f"      Got {len(full_answer)} chars")
             return full_answer.strip()
 
         except (Timeout, ConnectionError) as e:
-            print(f"Network error (attempt {attempt}/{MAX_RETRIES}): {type(e).__name__}")
-            time.sleep(DELAY_BETWEEN_CALLS * attempt)
+            print(f"      Network error (attempt {attempt}): {type(e).__name__}")
+            time.sleep(DELAY * attempt)
         except RequestException as e:
-            print(f"Request error (attempt {attempt}/{MAX_RETRIES}): {e}")
-            time.sleep(DELAY_BETWEEN_CALLS * attempt)
+            print(f"      Request error (attempt {attempt}): {e}")
+            time.sleep(DELAY * attempt)
 
     raise RuntimeError(f"Failed after {MAX_RETRIES} retries.")
 
@@ -330,45 +217,43 @@ def call_llm(prompt: str) -> str:
 # ─────────────────────────────────────────────────────────────────────
 # Prompt builders
 # ─────────────────────────────────────────────────────────────────────
-def reference_block(raw_inputs: list, ref_inputs: dict, registry: dict, current_entities: dict) -> str:
-    """Tells the LLM exactly how to reference every input, with known columns."""
+def reference_block(sources, registry, current_entities):
+    """Build source/ref instructions for the LLM."""
     lines = []
-    for t in raw_inputs:
-        lines.append(f"- {{{{ source('raw', '{t}') }}}}  (raw table)")
-    for inp, model in ref_inputs.items():
-        cols = []
-        if model in registry["entities"]:
-            cols = registry["entities"][model].get("output_columns", [])
-        elif model in current_entities:
-            cols = current_entities[model].get("target_columns", [])
-        col_hint = f" — output columns: {', '.join(cols)}" if cols else ""
-        lines.append(
-            f"- {{{{ ref('{model}') }}}}  (existing model replacing raw `{inp}`; "
-            f"use its cleaned column names{col_hint})"
-        )
-    return "\n".join(lines) if lines else "- see mapping"
+    for src in sources:
+        if src in registry["entities"]:
+            reg = registry["entities"][src]
+            cols = reg.get("output_columns", [])
+            hint = f" — columns: {', '.join(cols)}" if cols else ""
+            lines.append(f"  - {{{{ ref('{src}') }}}}  (existing model{hint})")
+        elif src in current_entities:
+            cols = current_entities[src].get("output_columns", [])
+            hint = f" — columns: {', '.join(cols)}" if cols else ""
+            lines.append(f"  - {{{{ ref('{src}') }}}}  (model in this run{hint})")
+        else:
+            lines.append(f"  - {{{{ source('raw', '{src}') }}}}  (raw table)")
+    return "\n".join(lines) or "  - see mapping"
 
 
-def create_sql_prompt(name, layer, mapping_text, ref_block, skill) -> str:
+def create_sql_prompt(name, layer, mapping, ref_block, skill):
     return f"""You are a senior dbt developer. CREATE a new dbt SQL model `{name}` (layer: {layer}).
 
 === HOUSE STYLE (follow exactly) ===
 {skill}
 
 === MAPPING ===
-{mapping_text}
+{mapping}
 
-=== HOW TO REFERENCE EVERY INPUT (follow exactly) ===
+=== HOW TO REFERENCE INPUTS (follow exactly) ===
 {ref_block}
 
-Apply ALL transformations from the "Transformation (SQL Snippet)" column exactly.
+Apply ALL transformations exactly.
 Output ONLY raw SQL, no markdown, no explanation."""
 
 
-def update_sql_prompt(name, layer, mapping_text, ref_block, skill, previous_sql) -> str:
+def update_sql_prompt(name, layer, mapping, ref_block, skill, previous_sql):
     return f"""You are a senior dbt developer. UPDATE an existing dbt SQL model `{name}` (layer: {layer}).
-The mapping sheet has changed. Modify the previous model to match the NEW mapping.
-PRESERVE all structure, style, and logic that is still correct — make surgical changes only.
+The contract changed. Make SURGICAL changes only — preserve correct structure and logic.
 
 === HOUSE STYLE (follow exactly) ===
 {skill}
@@ -376,197 +261,195 @@ PRESERVE all structure, style, and logic that is still correct — make surgical
 === PREVIOUS MODEL (your earlier output) ===
 {previous_sql}
 
-=== NEW MAPPING (the source of truth now) ===
-{mapping_text}
+=== NEW MAPPING (source of truth now) ===
+{mapping}
 
-=== HOW TO REFERENCE EVERY INPUT (follow exactly) ===
+=== HOW TO REFERENCE INPUTS (follow exactly) ===
 {ref_block}
 
-Apply ALL transformations from the "Transformation (SQL Snippet)" column exactly.
-Output ONLY the full updated raw SQL, no markdown, no explanation, no diff — the complete file."""
+Output ONLY the complete updated raw SQL, no markdown, no diff."""
 
 
-def yml_prompt(name, mapping_text, skill) -> str:
+def yml_prompt(name, mapping, skill):
     return f"""You are a senior dbt developer. Generate the dbt schema YAML for `{name}`.
 
 === HOUSE STYLE (follow exactly) ===
 {skill}
 
 === MAPPING ===
-{mapping_text}
+{mapping}
 
-Output ONLY raw YAML, no markdown, no explanation."""
+Output ONLY raw YAML, no markdown."""
 
 
-def sources_yml_prompt(raw_tables: dict) -> str:
-    lines = [
-        f"- table: {t}, columns: {', '.join(cols) if cols else 'unknown'}"
-        for t, cols in sorted(raw_tables.items())
-    ]
+def sources_yml_prompt(raw_tables):
+    lines = [f"- table: {t}" for t in sorted(raw_tables)]
     return f"""Write a complete dbt sources.yml file.
 Source name: raw
-Tables (this is the FULL list — include every one):
+Tables (include ALL):
 {chr(10).join(lines)}
 
-Output ONLY raw YAML, no markdown, no explanation."""
-
-
-# ─────────────────────────────────────────────────────────────────────
-# Raw-table column collection (for sources.yml + registry)
-# ─────────────────────────────────────────────────────────────────────
-def collect_raw_columns(current_entities: dict, raw_table_names: set) -> dict:
-    cols = defaultdict(set)
-    for ent in current_entities.values():
-        df = ent["df"]
-        src_t = find_col(df, "source", "table")
-        src_c = find_col(df, "source", "column")
-        if not src_t:
-            continue
-        for _, row in df.iterrows():
-            t = str(row.get(src_t, "")).strip().lower()
-            c = str(row.get(src_c, "")).strip() if src_c else ""
-            if t in raw_table_names and c and c.lower() not in NULLISH:
-                cols[t].add(c)
-    return {t: sorted(c) for t, c in cols.items()}
+Output ONLY raw YAML, no markdown."""
 
 
 # ─────────────────────────────────────────────────────────────────────
 # Save helper
 # ─────────────────────────────────────────────────────────────────────
-def save_file(content: str, filepath: Path):
+def save_file(content, filepath):
     filepath.parent.mkdir(parents=True, exist_ok=True)
     filepath.write_text(content)
-    print(f"Saved: {filepath}")
+    print(f"      Saved: {filepath}")
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Process one mapping file
+# Topological sort
 # ─────────────────────────────────────────────────────────────────────
-def process_mapping(mapping_file: Path, registry: dict, skill: str):
-    print(f"\n{'='*60}\nProcessing: {mapping_file}\n{'='*60}")
+def topo_sort(current_entities, registry):
+    names = list(current_entities.keys())
+    name_set = set(names)
 
-    current = parse_mapping_file(mapping_file)
-    print(f"Entities in file: {list(current)}")
+    deps = {}
+    for name, c in current_entities.items():
+        deps[name] = {s for s in c["sources"] if s in name_set and s != name}
 
-    # ── classify all inputs & find raw tables ─────────────────────
-    all_raw = set()
-    for name, ent in current.items():
-        raw, refs = classify_inputs(ent["inputs"], current, registry)
-        ent["raw_inputs"], ent["ref_inputs"] = raw, refs
-        all_raw.update(raw)
-
-    # ── sources.yml (registry-managed: regenerate on NEW raw table) ─
-    raw_cols = collect_raw_columns(current, all_raw)
-    new_tables = [t for t in raw_cols if t not in registry["raw_tables"]]
-    # also merge any new columns on known tables
-    cols_changed = any(
-        set(raw_cols.get(t, [])) - set(registry["raw_tables"].get(t, []))
-        for t in raw_cols
-    )
-    if new_tables or cols_changed:
-        for t, c in raw_cols.items():
-            merged = sorted(set(registry["raw_tables"].get(t, [])) | set(c))
-            registry["raw_tables"][t] = merged
-        print(f"\nNew/changed raw tables detected: {new_tables or '(columns updated)'}")
-        print("Regenerating sources.yml with full known table set...")
-        save_file(
-            call_llm(sources_yml_prompt(registry["raw_tables"])),
-            DBT_MODELS_DIR / "sources.yml"
-        )
-        time.sleep(DELAY_BETWEEN_CALLS)
-    else:
-        print("\nsources.yml up to date — skipping")
-
-    # ── layers + processing order ──────────────────────────────────
-    layers  = infer_layers(current, registry)
-    ordered = topo_sort(current, registry)
-    print(f"\nLayers: {layers}")
-    print(f"Order : {ordered}\n")
-
-    # ── generate each entity ───────────────────────────────────────
-    for name in ordered:
-        ent       = current[name]
-        layer     = layers[name]
-        reg_entry = registry["entities"].get(name)
-        sql_path  = DBT_MODELS_DIR / layer / f"{name}.sql"
-        yml_path  = DBT_MODELS_DIR / layer / f"_{name}.yml"
-
-        ref_block = reference_block(ent["raw_inputs"], ent["ref_inputs"], registry, current)
-
-        # ── SKIP: unchanged ────────────────────────────────────────
-        if reg_entry and reg_entry.get("mapping_hash") == ent["hash"] and sql_path.exists():
-            print(f"[SKIP] {name} — mapping unchanged")
-            continue
-
-        # ── UPDATE: existing model, mapping changed ────────────────
-        if reg_entry and sql_path.exists():
-            print(f"[UPDATE] {name} ({layer})")
-            print(f"  source() → {ent['raw_inputs']}")
-            print(f"  ref()    → {ent['ref_inputs']}")
-            previous_sql = sql_path.read_text()
-            print("  Updating SQL...")
-            save_file(
-                call_llm(update_sql_prompt(name, layer, ent["mapping_text"], ref_block, skill, previous_sql)),
-                sql_path
-            )
-        # ── CREATE: new entity ─────────────────────────────────────
-        else:
-            print(f"[CREATE] {name} ({layer})")
-            print(f"  source() → {ent['raw_inputs']}")
-            print(f"  ref()    → {ent['ref_inputs']}")
-            print("  Generating SQL...")
-            save_file(
-                call_llm(create_sql_prompt(name, layer, ent["mapping_text"], ref_block, skill)),
-                sql_path
-            )
-        time.sleep(DELAY_BETWEEN_CALLS)
-
-        print("  Generating YAML...")
-        save_file(call_llm(yml_prompt(name, ent["mapping_text"], skill)), yml_path)
-        time.sleep(DELAY_BETWEEN_CALLS)
-
-        # ── record in registry ─────────────────────────────────────
-        registry["entities"][name] = {
-            "layer":          layer,
-            "file":           str(sql_path),
-            "mapping_hash":   ent["hash"],
-            "sources":        ent["raw_inputs"],
-            "refs":           sorted(set(ent["ref_inputs"].values())),
-            "output_columns": ent["target_columns"],
-            "mapping_file":   ent["mapping_file"],
-            "last_generated": datetime.datetime.utcnow().isoformat() + "Z",
-        }
-        save_registry(registry)   # save after every entity — crash-safe
+    ordered, placed = [], set()
+    remaining = dict(deps)
+    while remaining:
+        ready = sorted(n for n, d in remaining.items() if d <= placed)
+        if not ready:
+            print(f"  WARNING: dependency cycle among {list(remaining)}")
+            ordered.extend(sorted(remaining))
+            break
+        for n in ready:
+            ordered.append(n)
+            placed.add(n)
+            del remaining[n]
+    return ordered
 
 
 # ─────────────────────────────────────────────────────────────────────
-# Entry point
+# Get contract files to process
 # ─────────────────────────────────────────────────────────────────────
-def get_mapping_files() -> list:
+def get_contract_files():
     changed = os.environ.get("CHANGED_FILES", "").strip()
     if changed:
-        files = [Path(f) for f in changed.split() if f.endswith(".xlsx") and Path(f).exists()]
-        print(f"Processing {len(files)} changed file(s): {[str(f) for f in files]}")
+        files = [Path(f) for f in changed.split() if f.endswith(".yaml") and Path(f).exists()]
+        print(f"Processing {len(files)} changed contract(s): {[str(f) for f in files]}")
     else:
-        files = list(MAPPING_DIR.glob("**/*.xlsx"))
-        print(f"Processing all {len(files)} file(s) in {MAPPING_DIR}/")
+        files = sorted(CONTRACTS_DIR.rglob("*.yaml"))
+        print(f"Processing all {len(files)} contract(s) in {CONTRACTS_DIR}/")
     return files
 
 
+# ─────────────────────────────────────────────────────────────────────
+# Main
+# ─────────────────────────────────────────────────────────────────────
 def main():
     if not API_KEY:
-        raise EnvironmentError("API_KEY environment variable is not set.")
+        print("ERROR: API_KEY environment variable not set.")
+        sys.exit(1)
 
     registry = load_registry()
     skill    = load_skill()
-    print(f"Registry: {len(registry['entities'])} known entities, "
-          f"{len(registry['raw_tables'])} known raw tables")
+    print(f"Registry: {len(registry['entities'])} entities, {len(registry['raw_tables'])} raw tables")
 
-    for f in get_mapping_files():
-        process_mapping(f, registry, skill)
+    # Parse all contract files
+    contract_files = get_contract_files()
+    if not contract_files:
+        print("No contract files found.")
+        return
+
+    current = {}
+    for cf in contract_files:
+        c = parse_contract(cf)
+        current[c["entity"]] = c
+        print(f"  Parsed: {c['entity']} (domain={c['domain']}, layer={c['layer']}, sources={c['sources']})")
+
+    # Identify raw tables (sources not in any entity)
+    all_entity_ids = set(current.keys()) | set(registry["entities"].keys())
+    raw_tables = set()
+    for c in current.values():
+        for src in c["sources"]:
+            if src not in all_entity_ids:
+                raw_tables.add(src)
+
+    # ── sources.yml — regenerate on new raw tables ────────────────
+    new_raws = raw_tables - set(registry["raw_tables"].keys())
+    if new_raws:
+        for t in raw_tables:
+            registry["raw_tables"][t] = []
+        print(f"\n  New raw tables: {sorted(new_raws)} — regenerating sources.yml")
+        save_file(
+            call_llm(sources_yml_prompt(registry["raw_tables"])),
+            DBT_DIR / "sources.yml"
+        )
+        time.sleep(DELAY)
+    else:
+        print("\n  sources.yml up to date")
+
+    # ── Topological sort ──────────────────────────────────────────
+    ordered = topo_sort(current, registry)
+    print(f"  Processing order: {ordered}\n")
+
+    # ── Generate each entity ──────────────────────────────────────
+    for name in ordered:
+        c          = current[name]
+        reg_entry  = registry["entities"].get(name)
+        sql_path   = DBT_DIR / c["domain"] / c["layer"] / f"{name}.sql"
+        yml_path   = DBT_DIR / c["domain"] / c["layer"] / f"_{name}.yml"
+        refs       = reference_block(c["sources"], registry, current)
+
+        # SKIP unchanged
+        if reg_entry and reg_entry.get("contract_hash") == c["contract_hash"] and sql_path.exists():
+            print(f"  [SKIP] {name} — contract unchanged")
+            continue
+
+        # UPDATE existing
+        if reg_entry and sql_path.exists():
+            print(f"  [UPDATE] {name} ({c['domain']}/{c['layer']})")
+            print(f"    source() / ref() → {c['sources']}")
+            prev_sql = sql_path.read_text()
+            print("    Updating SQL...")
+            save_file(
+                call_llm(update_sql_prompt(name, c["layer"], c["mapping_text"], refs, skill, prev_sql)),
+                sql_path
+            )
+        else:
+            # CREATE new
+            print(f"  [CREATE] {name} ({c['domain']}/{c['layer']})")
+            print(f"    source() / ref() → {c['sources']}")
+            print("    Generating SQL...")
+            save_file(
+                call_llm(create_sql_prompt(name, c["layer"], c["mapping_text"], refs, skill)),
+                sql_path
+            )
+
+        time.sleep(DELAY)
+
+        print("    Generating YAML schema...")
+        save_file(
+            call_llm(yml_prompt(name, c["mapping_text"], skill)),
+            yml_path
+        )
+        time.sleep(DELAY)
+
+        # Update registry
+        registry["entities"][name] = {
+            "layer":          c["layer"],
+            "domain":         c["domain"],
+            "version":        c["version"],
+            "file":           str(sql_path),
+            "contract_yaml":  c["contract_file"],
+            "contract_hash":  c["contract_hash"],
+            "sources":        c["sources"],
+            "refs":           [s for s in c["sources"] if s in all_entity_ids],
+            "output_columns": c["output_columns"],
+            "last_generated": datetime.datetime.utcnow().isoformat() + "Z",
+        }
+        save_registry(registry)  # save after each entity — crash-safe
 
     save_registry(registry)
-    print(f"\nAll done! Models in {DBT_MODELS_DIR}/, memory in {REGISTRY_PATH}")
+    print(f"\n✅ All done! Models → {DBT_DIR}/, Registry → {REGISTRY}")
 
 
 if __name__ == "__main__":

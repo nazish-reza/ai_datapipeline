@@ -1,0 +1,200 @@
+version: 1.0.0
+kind: DataContract
+apiVersion: v3.0.2
+id: book_insights.fct_user_book_insights
+name: fct_user_book_insights
+tags:
+- insights
+- fact
+- users
+- books
+- ratings
+status: development
+servers:
+- server: production
+  type: BigQuery
+  description: BigQuery dataset for book_insights
+  environment: production
+dataProduct: fct_user_book_insights
+description:
+  purpose: Advanced user-book analytics and insight reporting.
+domain: book_insights
+schema:
+- name: fct_user_book_insights
+  physicalType: table
+  description: Fact table of user-book interaction insights with window-based rating
+    metrics.
+  tags:
+  - insights
+  - fact
+  - users
+  - books
+  - ratings
+  logicalType: object
+  physicalName: fct_user_book_insights
+  properties:
+  - name: insight_id
+    physicalType: INT64
+    description: Primary key via row_number().
+    businessName: Insight ID
+    primaryKey: true
+    primaryKeyPosition: 1
+    logicalType: integer
+    required: true
+    unique: true
+    transformSourceObjects:
+    - derived
+    transformDescription: Surrogate key
+    examples:
+    - '1'
+  - name: user_id
+    physicalType: INT64
+    description: FK to dim_users.
+    businessName: User ID
+    primaryKey: false
+    logicalType: integer
+    required: true
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: FK reference
+    examples:
+    - '12345'
+  - name: book_id
+    physicalType: STRING
+    description: FK to dim_books.
+    businessName: Book ID
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: FK reference
+    examples:
+    - 019283
+  - name: author_name
+    physicalType: STRING
+    description: Book author name.
+    businessName: Author Name
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Direct reference
+    examples:
+    - Tolkien
+  - name: publisher_name
+    physicalType: STRING
+    description: Publisher name.
+    businessName: Publisher Name
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Direct reference
+    examples:
+    - Penguin
+  - name: user_age_group
+    physicalType: STRING
+    description: Age group of the user.
+    businessName: User Age Group
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Age segmentation
+    examples:
+    - 26-40
+  - name: avg_user_rating
+    physicalType: FLOAT64
+    description: Average rating given by this user across all books.
+    businessName: Avg User Rating
+    primaryKey: false
+    logicalType: number
+    required: false
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: Window function
+    examples:
+    - '7.2'
+  - name: avg_book_rating
+    physicalType: FLOAT64
+    description: Average rating received by this book across all users.
+    businessName: Avg Book Rating
+    primaryKey: false
+    logicalType: number
+    required: false
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: Window function
+    examples:
+    - '6.8'
+  - name: rating_deviation
+    physicalType: FLOAT64
+    description: Difference between this rating and the book average.
+    businessName: Rating Deviation
+    primaryKey: false
+    logicalType: number
+    required: false
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: Advanced metric
+    examples:
+    - '1.5'
+  - name: user_location_country
+    physicalType: STRING
+    description: Country parsed from user location string.
+    businessName: User Location Country
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Parsed from location
+    examples:
+    - UK
+  - name: high_rating_flag
+    physicalType: INT64
+    description: 1 if rating >= 8, else 0.
+    businessName: High Rating Flag
+    primaryKey: false
+    logicalType: integer
+    required: true
+    unique: false
+    transformSourceObjects:
+    - ratings
+    transformDescription: Binary flag
+    examples:
+    - '1'
+team:
+- username: nazish-reza
+  name: Nazish Reza
+  description: Data Engineer
+  role: owner
+  dateIn: '2025-01-01'
+customProperties:
+- property: owner
+  value: nazish-reza
+- property: layer
+  value: marts
+- property: data_product_type
+  value: consumer-aligned
+- property: upstream_entities
+  value: dim_users, dim_books, ratings
+- property: team_name
+  value: Analytics
+- property: dataProductType
+  value: Data Product Consumer-Aligned
+- property: sources
+  value: dim_users,dim_books,ratings

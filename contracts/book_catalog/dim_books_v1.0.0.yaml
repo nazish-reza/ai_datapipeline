@@ -1,0 +1,171 @@
+version: 1.0.0
+kind: DataContract
+apiVersion: v3.0.2
+id: book_catalog.dim_books
+name: dim_books
+tags:
+- books
+- catalog
+- dimension
+status: development
+servers:
+- server: production
+  type: BigQuery
+  description: BigQuery dataset for book_catalog
+  environment: production
+dataProduct: dim_books
+description:
+  purpose: Analytical use — book-level filtering and enrichment.
+domain: book_catalog
+schema:
+- name: dim_books
+  physicalType: table
+  description: Book dimension table with cleaned metadata from the raw books source.
+  tags:
+  - books
+  - catalog
+  - dimension
+  logicalType: object
+  physicalName: dim_books
+  properties:
+  - name: book_id
+    physicalType: STRING
+    description: Primary key. ISBN cast as string.
+    businessName: Book ID
+    primaryKey: true
+    primaryKeyPosition: 1
+    logicalType: string
+    required: true
+    unique: true
+    transformSourceObjects:
+    - books
+    transformDescription: Cast ISBN to string
+    examples:
+    - 0316769177
+    quality:
+    - description: book_id must not be null
+      severity: error
+      type: not_null
+    - description: book_id must be unique
+      severity: error
+      type: unique
+  - name: title
+    physicalType: STRING
+    description: Book title, trimmed of whitespace.
+    businessName: Title
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Remove leading/trailing spaces
+    examples:
+    - The Hobbit
+    quality:
+    - description: title must not be null
+      severity: error
+      type: not_null
+  - name: author_name
+    physicalType: STRING
+    description: Author name normalised with initcap.
+    businessName: Author Name
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Normalize casing
+    examples:
+    - J.R.R. Tolkien
+    quality:
+    - description: author_name must not be null
+      severity: error
+      type: not_null
+  - name: publication_year
+    physicalType: INT64
+    description: Year of publication. 0 replaced with NULL.
+    businessName: Publication Year
+    primaryKey: false
+    logicalType: integer
+    required: false
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Remove invalid zero year
+    examples:
+    - '1937'
+  - name: publisher_name
+    physicalType: STRING
+    description: Publisher name, trimmed.
+    businessName: Publisher Name
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Remove whitespace
+    examples:
+    - Allen & Unwin
+  - name: image_small
+    physicalType: STRING
+    description: URL to small cover image.
+    businessName: Image Small URL
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Direct reference
+    examples:
+    - http://...
+  - name: image_medium
+    physicalType: STRING
+    description: URL to medium cover image.
+    businessName: Image Medium URL
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Direct reference
+    examples:
+    - http://...
+  - name: image_large
+    physicalType: STRING
+    description: URL to large cover image.
+    businessName: Image Large URL
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - books
+    transformDescription: Direct reference
+    examples:
+    - http://...
+team:
+- username: nazish-reza
+  name: Nazish Reza
+  description: Data Engineer
+  role: owner
+  dateIn: '2025-01-01'
+customProperties:
+- property: owner
+  value: nazish-reza
+- property: layer
+  value: staging
+- property: data_product_type
+  value: source-aligned
+- property: upstream_entities
+  value: books
+- property: team_name
+  value: Data Engineering
+- property: dataProductType
+  value: Data Product Source-Aligned
+- property: sources
+  value: books

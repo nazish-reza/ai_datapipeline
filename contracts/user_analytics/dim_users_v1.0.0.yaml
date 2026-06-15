@@ -1,0 +1,105 @@
+version: 1.0.0
+kind: DataContract
+apiVersion: v3.0.2
+id: user_analytics.dim_users
+name: dim_users
+tags:
+- users
+- demographics
+- dimension
+status: development
+servers:
+- server: production
+  type: BigQuery
+  description: BigQuery dataset for user_analytics
+  environment: production
+dataProduct: dim_users
+description:
+  purpose: User-level analytics and segmentation.
+domain: user_analytics
+schema:
+- name: dim_users
+  physicalType: table
+  description: User dimension with cleaned location data and derived age segmentation.
+  tags:
+  - users
+  - demographics
+  - dimension
+  logicalType: object
+  physicalName: dim_users
+  properties:
+  - name: user_id
+    physicalType: INT64
+    description: Primary key. User-ID cast as integer.
+    businessName: User ID
+    primaryKey: true
+    primaryKeyPosition: 1
+    logicalType: integer
+    required: true
+    unique: true
+    transformSourceObjects:
+    - users
+    transformDescription: Cast to integer
+    examples:
+    - '12345'
+  - name: location_raw
+    physicalType: STRING
+    description: Raw location string trimmed of whitespace.
+    businessName: Location Raw
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Remove whitespace
+    examples:
+    - London
+    - UK
+  - name: age
+    physicalType: INT64
+    description: User age cast as integer.
+    businessName: Age
+    primaryKey: false
+    logicalType: integer
+    required: false
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Cast to integer
+    examples:
+    - '34'
+  - name: age_group
+    physicalType: STRING
+    description: Derived age bucket from CASE logic.
+    businessName: Age Group
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Age segmentation
+    examples:
+    - 26-40
+team:
+- username: nazish-reza
+  name: Nazish Reza
+  description: Data Engineer
+  role: owner
+  dateIn: '2025-01-01'
+customProperties:
+- property: owner
+  value: nazish-reza
+- property: layer
+  value: staging
+- property: data_product_type
+  value: source-aligned
+- property: upstream_entities
+  value: users
+- property: team_name
+  value: Data Engineering
+- property: dataProductType
+  value: Data Product Source-Aligned
+- property: sources
+  value: users

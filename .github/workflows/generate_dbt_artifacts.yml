@@ -1,27 +1,39 @@
-name: Generate dbt Models from Mapping
+name: "Action 2 — Generate dbt Models"
 
 on:
   pull_request:
     types: [opened, synchronize, reopened]
     paths:
-      - "mapping/**"
+      - "contracts/**/*.yaml"
 
 permissions:
   contents: write
   pull-requests: write
 
 jobs:
-  generate-dbt-models:
+  wait-for-ddl:
+    name: Wait for DDL Action
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait for Action 1
+        uses: lewagon/wait-on-check-action@v1.3.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          check-name: "Validate Contract + BigQuery DDL"
+          repo-token: ${{ secrets.GITHUB_TOKEN }}
+          wait-interval: 15
+          allowed-conclusions: success,skipped
+
+  generate-dbt:
     name: Generate dbt SQL & YML
     runs-on: ubuntu-latest
+    needs: wait-for-ddl
 
     steps:
       - name: Check if bot commit
         id: guard
         run: |
-          ACTOR="${{ github.actor }}"
-          echo "Triggered by: $ACTOR"
-          if [ "$ACTOR" = "github-actions[bot]" ]; then
+          if [ "${{ github.actor }}" = "github-actions[bot]" ]; then
             echo "skip=true" >> $GITHUB_OUTPUT
           else
             echo "skip=false" >> $GITHUB_OUTPUT
@@ -43,26 +55,26 @@ jobs:
 
       - name: Install dependencies
         if: steps.guard.outputs.skip != 'true'
-        run: pip install -r scripts/requirements.txt
+        run: pip install pyyaml requests
 
-      - name: Detect changed mapping files
+      - name: Detect changed contracts
         if: steps.guard.outputs.skip != 'true'
         id: changed
         run: |
-          git diff --name-only origin/${{ github.base_ref }}...HEAD -- mapping/ > changed_mappings.txt
-          echo "Changed mapping files:"
-          cat changed_mappings.txt
-          echo "files=$(cat changed_mappings.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
+          git diff --name-only origin/${{ github.base_ref }}...HEAD -- contracts/ > changed.txt
+          echo "Changed contracts:"
+          cat changed.txt
+          echo "files=$(cat changed.txt | tr '\n' ' ')" >> $GITHUB_OUTPUT
 
       - name: Generate dbt models
         if: steps.guard.outputs.skip != 'true'
         env:
-          API_KEY: ${{ secrets.API_KEY }}
+          API_KEY: ${{ secrets.NVIDIA_API_KEY }}
           INVOKE_URL: ${{ secrets.INVOKE_URL }}
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: python scripts/generate_dbt_models.py
 
-      - name: Commit via GitHub API (produces verified commits)
+      - name: Commit dbt models + registry via GitHub API
         if: steps.guard.outputs.skip != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -70,12 +82,11 @@ jobs:
           BRANCH: ${{ github.head_ref }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          git add dbt/   # models + registry.json (memory) committed together
+          git add dbt/
           if git diff --staged --quiet; then
-            echo "No changes to commit"
+            echo "No dbt changes to commit"
             exit 0
           fi
-
           echo "Files to commit:"
           git diff --staged --name-only
 
@@ -88,9 +99,8 @@ jobs:
           head_sha = os.environ["HEAD_SHA"]
 
           def gh(method, path, body=None):
-              url = f"https://api.github.com{path}"
               req = urllib.request.Request(
-                  url,
+                  f"https://api.github.com{path}",
                   data=json.dumps(body).encode() if body else None,
                   method=method,
                   headers={
@@ -103,61 +113,28 @@ jobs:
               with urllib.request.urlopen(req) as r:
                   return json.loads(r.read())
 
-          # Get staged files
-          result = subprocess.run(
-              ["git", "diff", "--staged", "--name-only"],
-              capture_output=True, text=True
-          )
+          result = subprocess.run(["git","diff","--staged","--name-only"], capture_output=True, text=True)
           staged = [f.strip() for f in result.stdout.strip().splitlines() if f.strip()]
-          print(f"Committing {len(staged)} file(s) via GitHub API")
 
-          # Create blobs
           blobs = []
-          for filepath in staged:
-              if not os.path.exists(filepath):
-                  continue
-              with open(filepath, "rb") as f:
+          for fp in staged:
+              if not os.path.exists(fp): continue
+              with open(fp,"rb") as f:
                   content = base64.b64encode(f.read()).decode()
-              blob = gh("POST", f"/repos/{repo}/git/blobs", {
-                  "content": content,
-                  "encoding": "base64"
-              })
-              blobs.append({
-                  "path": filepath,
-                  "mode": "100644",
-                  "type": "blob",
-                  "sha": blob["sha"]
-              })
+              blob = gh("POST", f"/repos/{repo}/git/blobs", {"content": content, "encoding": "base64"})
+              blobs.append({"path": fp, "mode": "100644", "type": "blob", "sha": blob["sha"]})
 
-          if not blobs:
-              print("Nothing to commit")
-              exit(0)
+          if not blobs: exit(0)
 
-          # Get base tree
-          commit    = gh("GET", f"/repos/{repo}/git/commits/{head_sha}")
-          base_tree = commit["tree"]["sha"]
-
-          # Create new tree
-          tree = gh("POST", f"/repos/{repo}/git/trees", {
-              "base_tree": base_tree,
-              "tree": blobs
-          })
-
-          # Create verified commit via API
+          commit     = gh("GET",  f"/repos/{repo}/git/commits/{head_sha}")
+          tree       = gh("POST", f"/repos/{repo}/git/trees", {"base_tree": commit["tree"]["sha"], "tree": blobs})
           new_commit = gh("POST", f"/repos/{repo}/git/commits", {
-              "message": "chore: auto-generate dbt models from mapping sheet [skip ci]",
-              "tree": tree["sha"],
-              "parents": [head_sha]
+              "message": "chore: auto-generate dbt models from contracts [skip ci]",
+              "tree": tree["sha"], "parents": [head_sha]
           })
-
-          # Update branch ref
-          gh("PATCH", f"/repos/{repo}/git/refs/heads/{branch}", {
-              "sha": new_commit["sha"],
-              "force": False
-          })
-
-          print(f"Verified commit created: {new_commit['sha']}")
+          gh("PATCH", f"/repos/{repo}/git/refs/heads/{branch}", {"sha": new_commit["sha"], "force": False})
+          print(f"✅ Verified commit: {new_commit['sha']}")
           PYEOF
 
       - name: Done
-        run: echo "Workflow complete"
+        run: echo "✅ Action 2 complete"

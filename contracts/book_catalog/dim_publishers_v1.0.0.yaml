@@ -1,0 +1,93 @@
+version: 1.0.0
+kind: DataContract
+apiVersion: v3.0.2
+id: book_catalog.dim_publishers
+name: dim_publishers
+tags:
+- publishers
+- catalog
+- dimension
+status: development
+servers:
+- server: production
+  type: BigQuery
+  description: BigQuery dataset for book_catalog
+  environment: production
+dataProduct: dim_publishers
+description:
+  purpose: Publisher-level filtering and enrichment.
+domain: book_catalog
+schema:
+- name: dim_publishers
+  physicalType: table
+  description: Publisher dimension with surrogate keys derived from the raw books
+    source.
+  tags:
+  - publishers
+  - catalog
+  - dimension
+  logicalType: object
+  physicalName: dim_publishers
+  properties:
+  - name: publisher_id
+    physicalType: INT64
+    description: Surrogate PK via dense_rank() over publisher name.
+    businessName: Publisher ID
+    primaryKey: true
+    primaryKeyPosition: 1
+    logicalType: integer
+    required: true
+    unique: true
+    transformSourceObjects:
+    - books
+    transformDescription: Surrogate key
+    examples:
+    - '1'
+    quality:
+    - description: publisher_id must not be null
+      severity: error
+      type: not_null
+    - description: publisher_id must be unique
+      severity: error
+      type: unique
+  - name: publisher_name
+    physicalType: STRING
+    description: Distinct trimmed publisher name.
+    businessName: Publisher Name
+    primaryKey: false
+    logicalType: string
+    required: true
+    unique: true
+    transformSourceObjects:
+    - books
+    transformDescription: Deduplicated publisher name
+    examples:
+    - Penguin Books
+    quality:
+    - description: publisher_name must not be null
+      severity: error
+      type: not_null
+    - description: publisher_name must be unique
+      severity: warning
+      type: unique
+team:
+- username: nazish-reza
+  name: Nazish Reza
+  description: Data Engineer
+  role: owner
+  dateIn: '2025-01-01'
+customProperties:
+- property: owner
+  value: nazish-reza
+- property: layer
+  value: staging
+- property: data_product_type
+  value: source-aligned
+- property: upstream_entities
+  value: books
+- property: team_name
+  value: Data Engineering
+- property: dataProductType
+  value: Data Product Source-Aligned
+- property: sources
+  value: books

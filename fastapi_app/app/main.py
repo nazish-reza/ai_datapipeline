@@ -1,8 +1,13 @@
 from fastapi import FastAPI
 import subprocess
 import os
+from fastapi.staticfiles import StaticFiles
+from app.routers import contracts_router
 
 app = FastAPI()
+
+app.include_router(contracts_router, prefix="/api/contracts", tags=["contracts"])
+app.mount("/portal", StaticFiles(directory="app/static/portal", html=True), name="portal")
 
 process = None
 

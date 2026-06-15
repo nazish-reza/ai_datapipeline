@@ -1,0 +1,111 @@
+version: 1.0.0
+kind: DataContract
+apiVersion: v3.0.2
+id: user_analytics.dim_location
+name: dim_location
+tags:
+- location
+- geography
+- dimension
+status: development
+servers:
+- server: production
+  type: BigQuery
+  description: BigQuery dataset for user_analytics
+  environment: production
+dataProduct: dim_location
+description:
+  purpose: Geographic segmentation and filtering.
+domain: user_analytics
+schema:
+- name: dim_location
+  physicalType: table
+  description: Location dimension parsed from the raw user location string.
+  tags:
+  - location
+  - geography
+  - dimension
+  logicalType: object
+  physicalName: dim_location
+  properties:
+  - name: location_id
+    physicalType: INT64
+    description: Surrogate PK via dense_rank() over location.
+    businessName: Location ID
+    primaryKey: true
+    primaryKeyPosition: 1
+    logicalType: integer
+    required: true
+    unique: true
+    transformSourceObjects:
+    - users
+    transformDescription: Surrogate key
+    examples:
+    - '1'
+    quality:
+    - description: location_id must not be null
+      severity: error
+      type: not_null
+    - description: location_id must be unique
+      severity: error
+      type: unique
+  - name: city
+    physicalType: STRING
+    description: First segment of the location string.
+    businessName: City
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Split by comma index 0
+    examples:
+    - London
+  - name: state
+    physicalType: STRING
+    description: Second segment of the location string.
+    businessName: State
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Split by comma index 1
+    examples:
+    - England
+  - name: country
+    physicalType: STRING
+    description: Third segment of the location string.
+    businessName: Country
+    primaryKey: false
+    logicalType: string
+    required: false
+    unique: false
+    transformSourceObjects:
+    - users
+    transformDescription: Split by comma index 2
+    examples:
+    - UK
+team:
+- username: nazish-reza
+  name: Nazish Reza
+  description: Data Engineer
+  role: owner
+  dateIn: '2025-01-01'
+customProperties:
+- property: owner
+  value: nazish-reza
+- property: layer
+  value: staging
+- property: data_product_type
+  value: source-aligned
+- property: upstream_entities
+  value: users
+- property: team_name
+  value: Data Engineering
+- property: dataProductType
+  value: Data Product Source-Aligned
+- property: sources
+  value: users
