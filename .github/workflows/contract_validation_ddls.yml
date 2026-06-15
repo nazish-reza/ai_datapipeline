@@ -64,7 +64,7 @@ jobs:
           CHANGED_FILES: ${{ steps.changed.outputs.files }}
         run: |
           python3 << 'PYEOF'
-          import os, subprocess, yaml, sys
+          import os, yaml, sys
           from pathlib import Path
 
           changed = os.environ.get("CHANGED_FILES", "").strip().split()
@@ -74,114 +74,156 @@ jobs:
               print("No changed YAML contracts found.")
               sys.exit(0)
 
+          # ── Helper: read project/dataset from contract YAML ─────
+          def get_bq_config(contract):
+              """Extract project + dataset from servers or customProperties."""
+              project, dataset = "", ""
+
+              # Try servers section first
+              for s in contract.get("servers", []):
+                  if isinstance(s, dict):
+                      if s.get("project"): project = s["project"]
+                      if s.get("dataset"): dataset = s["dataset"]
+
+              # Fallback: customProperties
+              if not project or not dataset:
+                  for cp in contract.get("customProperties", []):
+                      if isinstance(cp, dict):
+                          if cp.get("property") == "bq_project" and not project:
+                              project = str(cp.get("value", ""))
+                          if cp.get("property") == "bq_dataset" and not dataset:
+                              dataset = str(cp.get("value", ""))
+
+              # Fallback: infer dataset from domain + layer
+              if not dataset:
+                  domain = contract.get("domain", "default")
+                  layer = ""
+                  for cp in contract.get("customProperties", []):
+                      if isinstance(cp, dict) and cp.get("property") == "layer":
+                          layer = str(cp.get("value", ""))
+                  if layer == "marts":
+                      dataset = f"{domain}_mart"
+                  else:
+                      dataset = f"{domain}_stg"
+
+              return project, dataset
+
+          # ── Helper: generate DDL from schema ────────────────────
+          TYPE_MAP = {
+              "string": "STRING", "integer": "INT64", "number": "FLOAT64",
+              "boolean": "BOOL", "timestamp": "TIMESTAMP", "date": "DATE",
+              "float": "FLOAT64", "bytes": "BYTES",
+          }
+
+          def generate_ddl(contract, entity, project, dataset):
+              schema = contract.get("schema", [])
+              if not schema:
+                  return None
+
+              cols = schema[0].get("properties", schema[0].get("columns", []))
+              if not cols:
+                  return None
+
+              fqn = f"`{project}.{dataset}.{entity}`" if project else f"`{dataset}.{entity}`"
+              lines = [
+                  f"-- DDL for {entity}",
+                  f"-- Project: {project} | Dataset: {dataset}",
+                  f"CREATE TABLE IF NOT EXISTS {fqn} ("
+              ]
+              col_defs = []
+              for c in cols:
+                  ptype = c.get("physicalType") or TYPE_MAP.get(c.get("logicalType", "string"), "STRING")
+                  nn = " NOT NULL" if c.get("required") or c.get("primaryKey") else ""
+                  col_defs.append(f"  {c['name']:<35} {ptype}{nn}")
+              lines.append(",\n".join(col_defs))
+              lines.append(");")
+              return "\n".join(lines)
+
+          # ── Process each contract ───────────────────────────────
           errors = []
 
           for yf in yaml_files:
               print(f"\n{'='*60}")
               print(f"📄 {yf}")
               print(f"{'='*60}")
+
               path = Path(yf)
               domain = path.parent.name
               entity = path.stem.split("_v")[0]
 
-              # ── 1. Validate contract via datacontract lint ─────────
-              print("  🔍 Validating contract...")
-              lint = subprocess.run(
-                  ["datacontract", "lint", yf],
-                  capture_output=True, text=True
-              )
-              if lint.returncode != 0:
-                  print(f"  ⚠️  Lint warnings:\n{lint.stdout}\n{lint.stderr}")
-              else:
-                  print(f"  ✅ Contract valid")
+              try:
+                  contract = yaml.safe_load(path.read_text())
+              except Exception as e:
+                  print(f"  ❌ Failed to parse YAML: {e}")
+                  errors.append(f"{yf}: YAML parse error")
+                  continue
 
-              # ── 2. Export BigQuery DDL ──────────────────────────────
+              project, dataset = get_bq_config(contract)
+              print(f"  Domain:  {domain}")
+              print(f"  Entity:  {entity}")
+              print(f"  Project: {project or '(not set)'}")
+              print(f"  Dataset: {dataset}")
+
+              # ── 1. Generate DDL from schema ─────────────────────
               ddl_dir = Path("ddl") / domain
               ddl_dir.mkdir(parents=True, exist_ok=True)
               ddl_path = ddl_dir / f"{entity}.sql"
 
-              print("  📝 Exporting DDL...")
+              ddl_sql = generate_ddl(contract, entity, project, dataset)
+              if ddl_sql:
+                  ddl_path.write_text(ddl_sql)
+                  print(f"  ✅ DDL saved → {ddl_path}")
+              else:
+                  print(f"  ⚠️  No schema found — skipping DDL")
+                  errors.append(f"{yf}: no schema")
+                  continue
 
-              # Try sql export first (v0.12+ syntax)
-              export_ok = False
-              for cmd in [
-                  ["datacontract", "export", "sql", yf],
-                  ["datacontract", "export", yf, "--format", "sql"],
-              ]:
-                  result = subprocess.run(cmd, capture_output=True, text=True)
-                  if result.returncode == 0 and result.stdout.strip():
-                      ddl_path.write_text(result.stdout.strip())
-                      print(f"  ✅ DDL saved → {ddl_path}")
-                      export_ok = True
-                      break
+              # ── 2. Create BigQuery table ────────────────────────
+              if not project:
+                  print(f"  ℹ️  No project configured — DDL saved but not applied to BigQuery")
+                  continue
 
-              if not export_ok:
-                  # Fallback: generate DDL from YAML schema manually
-                  print("  ℹ️  CLI export failed, generating DDL from schema...")
-                  contract = yaml.safe_load(path.read_text())
-                  schema = contract.get("schema", [])
-                  if schema:
-                      table = schema[0]
-                      cols = table.get("properties", table.get("columns", []))
-                      type_map = {"string":"STRING","integer":"INT64","number":"FLOAT64",
-                                  "boolean":"BOOL","timestamp":"TIMESTAMP","date":"DATE"}
-
-                      # Read project/dataset from servers
-                      servers = contract.get("servers", [])
-                      bq = next((s for s in servers if "bigquery" in str(s.get("type","")).lower()), {})
-                      project = bq.get("project", "your-project")
-                      dataset = bq.get("dataset", domain)
-
-                      ddl_lines = [
-                          f"-- DDL for {entity} (domain: {domain})",
-                          f"CREATE TABLE IF NOT EXISTS `{project}.{dataset}.{entity}` ("
-                      ]
-                      col_defs = []
-                      for c in cols:
-                          ptype = c.get("physicalType", type_map.get(c.get("logicalType","string"), "STRING"))
-                          nn = " NOT NULL" if c.get("required") or c.get("primaryKey") else ""
-                          col_defs.append(f"  {c['name']:<35} {ptype}{nn}")
-                      ddl_lines.append(",\n".join(col_defs))
-                      ddl_lines.append(");")
-                      ddl_sql = "\n".join(ddl_lines)
-                      ddl_path.write_text(ddl_sql)
-                      print(f"  ✅ DDL generated → {ddl_path}")
-                  else:
-                      print(f"  ⚠️  No schema found in contract")
-                      errors.append(f"{yf}: no schema")
-                      continue
-
-              # ── 3. Apply DDL to BigQuery ────────────────────────────
-              print("  🏗️  Creating BigQuery table...")
               try:
-                  contract = yaml.safe_load(path.read_text())
-                  servers = contract.get("servers", [])
-                  bq = next((s for s in servers if "bigquery" in str(s.get("type","")).lower()), {})
-                  project = bq.get("project", "")
-                  dataset = bq.get("dataset", domain)
+                  from google.cloud import bigquery
+                  client = bigquery.Client(project=project)
 
-                  if project:
-                      from google.cloud import bigquery
-                      client = bigquery.Client(project=project)
-                      ddl_sql = ddl_path.read_text()
-                      for stmt in ddl_sql.split(";"):
-                          stmt = stmt.strip()
-                          if stmt and not stmt.startswith("--"):
-                              try:
-                                  client.query(stmt).result()
-                              except Exception as e:
-                                  print(f"  ⚠️  BQ error: {e}")
-                      print(f"  ✅ BigQuery table created/updated → {project}.{dataset}.{entity}")
-                  else:
-                      print(f"  ℹ️  No BigQuery project configured — DDL saved but not applied")
+                  # Create dataset if it doesn't exist
+                  dataset_ref = bigquery.DatasetReference(project, dataset)
+                  try:
+                      client.get_dataset(dataset_ref)
+                      print(f"  ✅ Dataset {project}.{dataset} exists")
+                  except Exception:
+                      print(f"  📦 Creating dataset {project}.{dataset}...")
+                      ds = bigquery.Dataset(dataset_ref)
+                      ds.location = "US"
+                      client.create_dataset(ds, exists_ok=True)
+                      print(f"  ✅ Dataset created")
+
+                  # Execute DDL
+                  for stmt in ddl_sql.split(";"):
+                      stmt = stmt.strip()
+                      if stmt and not stmt.startswith("--"):
+                          try:
+                              client.query(stmt).result()
+                          except Exception as e:
+                              print(f"  ⚠️  BQ query error: {e}")
+                              errors.append(f"{yf}: BQ error - {e}")
+
+                  print(f"  ✅ BigQuery table created → {project}.{dataset}.{entity}")
+
+              except ImportError:
+                  print(f"  ⚠️  google-cloud-bigquery not installed")
               except Exception as e:
-                  print(f"  ⚠️  BQ error: {e}")
+                  print(f"  ⚠️  BigQuery error: {e}")
+                  errors.append(f"{yf}: {e}")
 
+          # ── Summary ─────────────────────────────────────────────
           if errors:
-              print(f"\n⚠️  {len(errors)} error(s):")
-              for e in errors: print(f"  - {e}")
-
-          print("\n✅ Action 1 processing complete")
+              print(f"\n⚠️  {len(errors)} issue(s):")
+              for e in errors:
+                  print(f"  - {e}")
+              # Don't fail the action for warnings — DDL is still committed
+          print(f"\n✅ Action 1 complete — processed {len(yaml_files)} contract(s)")
           PYEOF
 
       - name: Commit DDL files via GitHub API

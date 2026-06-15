@@ -36,9 +36,7 @@ def _get_owner(data):
     return next((t.get("username","") for t in data.get("team",[]) if t.get("role")=="owner"), "")
 
 def _get_sources(data):
-    src_str = _get_custom(data, "sources")
-    if not src_str:
-        src_str = _get_custom(data, "upstream_entities")
+    src_str = _get_custom(data, "sources") or _get_custom(data, "upstream_entities")
     if src_str:
         return [s.strip() for s in src_str.split(",") if s.strip()]
     cols = _get_columns(data)
@@ -77,23 +75,87 @@ def _contract_meta(data):
         "sources": _get_sources(data),
     }
 
+def _read_server_details_from_excel(excel_path):
+    """Read project and dataset from the Excel Servers sheet (datacontract CLI misses these)."""
+    try:
+        from openpyxl import load_workbook
+        wb = load_workbook(excel_path, data_only=True)
+        if "Servers" not in wb.sheetnames:
+            return {}
+        ws = wb["Servers"]
+        details = {}
+        for r in range(1, ws.max_row + 2):
+            for col in [1, 2]:
+                key = str(ws.cell(row=r, column=col).value or "").strip().lower()
+                if not key:
+                    continue
+                # Value is typically in column C (index 3) or column B+1
+                val_col = 3 if col <= 2 else col + 1
+                val = str(ws.cell(row=r, column=val_col).value or "").strip()
+                if not val or val.startswith("="):
+                    continue
+                if "project" in key:
+                    details["project"] = val
+                elif "dataset" in key:
+                    details["dataset"] = val
+                elif "environment" in key and "environment" not in details:
+                    details["environment"] = val
+                elif "description" in key and "description" not in details:
+                    details["description"] = val
+        return details
+    except Exception:
+        return {}
+
+def _enrich_yaml_with_server(yaml_text, server_details):
+    """Inject project/dataset into the servers section of the YAML."""
+    if not server_details:
+        return yaml_text
+    parsed = _parse_yaml(yaml_text)
+    if not parsed:
+        return yaml_text
+
+    servers = parsed.get("servers", [])
+    if servers:
+        for s in servers:
+            if isinstance(s, dict):
+                if "project" not in s and server_details.get("project"):
+                    s["project"] = server_details["project"]
+                if "dataset" not in s and server_details.get("dataset"):
+                    s["dataset"] = server_details["dataset"]
+    else:
+        # No servers at all — create one
+        parsed["servers"] = [{
+            "server": "production",
+            "type": "BigQuery",
+            "environment": server_details.get("environment", "production"),
+            "project": server_details.get("project", ""),
+            "dataset": server_details.get("dataset", ""),
+        }]
+
+    return yaml.dump(parsed, default_flow_style=False, allow_unicode=True, sort_keys=False, indent=2)
+
 def _import_excel(file_path):
     try:
         from datacontract.data_contract import DataContract
         dc = DataContract()
         result = dc.import_from_source("excel", source=file_path)
-        return result.to_yaml()
+        yaml_text = result.to_yaml()
+
+        # Post-process: inject server details that the CLI misses
+        server_details = _read_server_details_from_excel(file_path)
+        if server_details:
+            yaml_text = _enrich_yaml_with_server(yaml_text, server_details)
+
+        return yaml_text
     except ImportError:
         raise HTTPException(500, "datacontract-cli[excel] not installed")
     except Exception as e:
         raise HTTPException(422, f"datacontract import failed: {str(e)}")
 
-def _remove_old_versions(domain_dir: Path, entity: str):
-    """Delete any existing YAML files for this entity in the domain folder."""
+def _remove_old_versions(domain_dir, entity):
     removed = []
-    for old_file in domain_dir.glob(f"{entity}_v*.yaml"):
-        old_file.unlink()
-        removed.append(str(old_file))
+    for old in domain_dir.glob(f"{entity}_v*.yaml"):
+        old.unlink(); removed.append(str(old))
     return removed
 
 @router.post("/import")
@@ -119,18 +181,12 @@ async def save_contract(req: SaveRequest):
     entity = re.sub(r"[^a-z0-9_\-]","_",req.entity.lower())
     version = re.sub(r"[^0-9\.]","",req.version) or "1.0.0"
     out_dir = CONTRACTS_DIR / domain; out_dir.mkdir(parents=True, exist_ok=True)
-
-    # Delete any old versions of this entity first
     removed = _remove_old_versions(out_dir, entity)
-
     out_path = out_dir / f"{entity}_v{version}.yaml"
     out_path.write_text(req.yaml_text)
-
     msg = f"Saved to {out_path}"
-    if removed:
-        msg += f" (replaced {len(removed)} old version(s))"
-
-    return JSONResponse({"saved":True,"path":str(out_path),"message":msg,"replaced":removed})
+    if removed: msg += f" (replaced {len(removed)} old version(s))"
+    return JSONResponse({"saved":True,"path":str(out_path),"message":msg})
 
 @router.get("")
 async def list_contracts():

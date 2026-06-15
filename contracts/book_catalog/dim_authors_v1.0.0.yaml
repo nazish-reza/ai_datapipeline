@@ -13,6 +13,8 @@ servers:
   type: BigQuery
   description: BigQuery dataset for book_catalog
   environment: production
+  project: genuine-arena-458814-u7
+  dataset: books_stg
 dataProduct: dim_authors
 description:
   purpose: Author-level filtering and enrichment.

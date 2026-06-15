@@ -13,6 +13,8 @@ servers:
   type: BigQuery
   description: BigQuery dataset for book_ratings
   environment: production
+  project: genuine-arena-458814-u7
+  dataset: books_mart
 dataProduct: fact_book_ratings
 description:
   purpose: Rating analysis and reporting.

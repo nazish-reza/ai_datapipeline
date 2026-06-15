@@ -77,7 +77,7 @@ function Sidebar({active,onSelect,rk}){
 
 /* ══ DATA MAP ══ */
 function DataMap({rk}){
-  const[contracts,setContracts]=useState(null),[ld,setLd]=useState(true),[zoom,setZoom]=useState(1),[search,setSearch]=useState('');
+  const[contracts,setContracts]=useState(null),[ld,setLd]=useState(true),[zoom,setZoom]=useState(1),[search,setSearch]=useState(''),[selected,setSelected]=useState(null);
   useEffect(()=>{setLd(true);api(B).then(d=>{const all=[];for(const dom of d.domains||[])for(const c of dom.contracts)all.push({...c,domain:dom.domain});setContracts(all);setLd(false)}).catch(()=>setLd(false))},[rk]);
   if(ld)return<div style={{padding:60,textAlign:'center'}}><Spin/></div>;
   if(!contracts?.length)return<div className="empty"><div className="empty-icon">🗺️</div><div className="empty-title">No contracts</div></div>;
@@ -109,12 +109,28 @@ function DataMap({rk}){
 
   const fIds=search?new Set(allNodes.filter(n=>n.name.toLowerCase().includes(search.toLowerCase())).map(n=>n.id)):null;
 
+  // Click selection: find all connected node IDs
+  const connectedIds=selected?new Set([selected,...edges.filter(e=>e.from===selected||e.to===selected).flatMap(e=>[e.from,e.to])]):null;
+  // Combined: search narrows, click highlights within that
+  const isHighlighted=(id)=>{
+    if(fIds&&!fIds.has(id))return false;
+    if(connectedIds&&!connectedIds.has(id))return false;
+    return true;
+  };
+  const isEdgeHighlighted=(e)=>{
+    if(fIds&&!fIds.has(e.from)&&!fIds.has(e.to))return false;
+    if(connectedIds&&e.from!==selected&&e.to!==selected)return false;
+    return true;
+  };
+
   return(<div className="main-inner">
     <div style={{marginBottom:20}}><h1 style={{fontSize:22,fontWeight:700}}>Data Map</h1><p style={{color:'var(--muted)',fontSize:13,marginTop:2}}>Explore how data flows through your organization.</p></div>
     <div className="datamap">
       <div className="datamap-toolbar"><input className="search-input" placeholder="Search entities..." value={search} onChange={e=>setSearch(e.target.value)} style={{maxWidth:220}}/>
         <div className="datamap-zoom"><button onClick={()=>setZoom(z=>Math.min(z+.15,2))}>+</button><button onClick={()=>setZoom(z=>Math.max(z-.15,.4))}>−</button><button onClick={()=>setZoom(1)} style={{width:'auto',padding:'0 8px',fontSize:11}}>1:1</button></div></div>
-      <div className="datamap-canvas"><svg width={W*zoom} height={H*zoom} viewBox={`0 0 ${W} ${H}`} style={{display:'block'}}>
+      <div className="datamap-canvas"><svg width={W*zoom} height={H*zoom} viewBox={`0 0 ${W} ${H}`} style={{display:'block'}} onClick={()=>setSelected(null)}>
+        {/* Click background to deselect */}
+        <rect x="0" y="0" width={W} height={H} fill="transparent"/>
 
         {/* Column labels */}
         <text x={COL_X.app+NW/2} y={28} textAnchor="middle" fill="var(--muted)" fontSize="11" fontWeight="600" style={{letterSpacing:'.06em'}}>SOURCES</text>
@@ -124,18 +140,19 @@ function DataMap({rk}){
 
         {/* Edges — bezier curves */}
         {edges.map((e,i)=>{const f=allNodes.find(n=>n.id===e.from),t=allNodes.find(n=>n.id===e.to);if(!f||!t)return null;
-          const dim=fIds&&(!fIds.has(f.id)&&!fIds.has(t.id));
+          const hi=isEdgeHighlighted(e);const isSelected=selected&&(e.from===selected||e.to===selected);
           const x1=f.x+NW,y1=f.y+NH/2+14,x2=t.x,y2=t.y+NH/2+14,dx=Math.abs(x2-x1)*.5;
-          return<path key={i} d={`M${x1} ${y1} C${x1+dx} ${y1} ${x2-dx} ${y2} ${x2} ${y2}`} fill="none" stroke={dim?'var(--border)':'#94a3b8'} strokeWidth={dim?.8:1.5} opacity={dim?.3:1}/>})}
+          return<path key={i} d={`M${x1} ${y1} C${x1+dx} ${y1} ${x2-dx} ${y2} ${x2} ${y2}`} fill="none" stroke={isSelected?'#6366f1':hi?'#94a3b8':'var(--border)'} strokeWidth={isSelected?2.5:hi?1.5:.8} opacity={hi?1:.2}/>})}
 
         {/* Nodes */}
-        {allNodes.map(n=>{const cat=CAT[n.type]||CAT.Application;const dim=fIds&&!fIds.has(n.id);
-          return(<g key={n.id} opacity={dim?.2:1} style={{cursor:'pointer'}}>
+        {allNodes.map(n=>{const cat=CAT[n.type]||CAT.Application;const hi=isHighlighted(n.id);const isSel=selected===n.id;
+          return(<g key={n.id} opacity={hi?1:.15} style={{cursor:'pointer',transition:'opacity 0.2s'}} onClick={e=>{e.stopPropagation();setSelected(selected===n.id?null:n.id)}}>
             {/* Category label bar */}
             <rect x={n.x} y={n.y} width={NW} height={14} rx={4} ry={4} fill={cat.color}/>
             <text x={n.x+NW/2} y={n.y+10} textAnchor="middle" fill="#fff" fontSize="7.5" fontWeight="700" style={{letterSpacing:'.05em'}}>{cat.label}</text>
             {/* Card body */}
-            <rect x={n.x} y={n.y+14} width={NW} height={NH} rx={0} ry={0} fill="var(--white)" stroke={cat.color} strokeWidth="1.5"/>
+            <rect x={n.x} y={n.y+14} width={NW} height={NH} rx={0} ry={0} fill="var(--white)" stroke={isSel?'#6366f1':cat.color} strokeWidth={isSel?3:1.5}/>
+            {isSel&&<rect x={n.x-3} y={n.y-3} width={NW+6} height={NH+14+6} rx={6} fill="none" stroke="#6366f1" strokeWidth="2" strokeDasharray="4,2" opacity=".5"/>}
             <rect x={n.x} y={n.y+14+NH-1} width={NW} height={1} fill={cat.color} opacity=".3"/>
             {/* Bottom rounded corners */}
             <rect x={n.x} y={n.y+14+NH-4} width={NW} height={5} rx={4} fill="var(--white)" stroke={cat.color} strokeWidth="1.5"/>
@@ -165,8 +182,10 @@ function Detail({domain,entity,onSaved}){
 
   return(<div className="main"><div className="main-inner">
     <div className="breadcrumb"><span>🏠</span><span className="sep">›</span><span>{domain}</span><span className="sep">›</span><span className="current">{entity}</span></div>
+    {/* Server info helper */}
+    {(()=>{const sv=d.servers?.[0]||{};window._sv=sv;return null})()}
     <div style={{display:'flex',justifyContent:'space-between',alignItems:'flex-start',marginBottom:20}}>
-      <div><div className="contract-title">Data Contract</div><div className="contract-subtitle"><span>{d.id||entity}</span><Badge value={`v${d.version}`} type="version"/><Badge value={`ODCS ${d.apiVersion||'v3.0.2'}`} type="odcs"/>{d.layer&&<Badge value={d.layer} type="layer"/>}{d.dataProductType&&<Badge value={d.dataProductType} type={d.dataProductType.includes('Consumer')?'development':'active'}/>}</div></div>
+      <div><div className="contract-title">Data Contract</div><div className="contract-subtitle"><span>{d.id||entity}</span><Badge value={`v${d.version}`} type="version"/><Badge value={`ODCS ${d.apiVersion||'v3.0.2'}`} type="odcs"/>{d.layer&&<Badge value={d.layer} type="layer"/>}{d.dataProductType&&<Badge value={d.dataProductType} type={d.dataProductType.includes('Consumer')?'development':'active'}/>}{d.servers?.[0]?.project&&<span style={{fontFamily:'var(--mono)',fontSize:10,color:'var(--muted)',background:'var(--surface)',padding:'2px 8px',borderRadius:12,border:'1px solid var(--border)'}}>🗄️ {d.servers[0].project}.{d.servers[0].dataset}</span>}</div></div>
       <div style={{display:'flex',gap:6}}>{!editing&&<button className="btn" onClick={()=>{setTab('yaml');setEditing(true)}}>✏️ Edit YAML</button>}{editing&&<><button className="btn btn-green" onClick={saveYaml} disabled={saving}>{saving?<Spin/>:'💾 Save'}</button><button className="btn" onClick={()=>setEditing(false)}>Cancel</button></>}</div>
     </div>
 
@@ -186,6 +205,9 @@ function Detail({domain,entity,onSaved}){
         <div><div className="fund-label">Purpose</div><div className="fund-value">{info.purpose||'—'}</div></div>
         <div><div className="fund-label">Owner</div><div className="fund-value">{info.owner||'—'}</div></div>
         <div><div className="fund-label">Data Product</div><div className="fund-value">{d.dataProduct||'—'}</div></div>
+        {d.servers?.[0]?.project&&<div><div className="fund-label">BigQuery Project</div><div className="fund-value" style={{fontFamily:'var(--mono)',fontSize:11}}>{d.servers[0].project}</div></div>}
+        {d.servers?.[0]?.dataset&&<div><div className="fund-label">BigQuery Dataset</div><div className="fund-value" style={{fontFamily:'var(--mono)',fontSize:11}}>{d.servers[0].dataset}</div></div>}
+        {d.servers?.[0]?.type&&!d.servers?.[0]?.project&&<div><div className="fund-label">Server Type</div><div className="fund-value">{d.servers[0].type}</div></div>}
       </div>{(d.tags||[]).length>0&&<div style={{marginTop:10}}>{d.tags.map(t=><span key={t} className="tag">{t}</span>)}</div>}</div></div>
 
       {tab!=='yaml'&&<div className="section"><div className="section-head"><span className="section-title">Schema</span><span className="section-sub">{cols.length} cols</span></div>
