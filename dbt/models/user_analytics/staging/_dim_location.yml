@@ -1,0 +1,24 @@
+```yaml
+version: 2
+models:
+- name: dim_location
+  description: Dimension table containing location information with one row per unique city-state-country combination.
+  columns:
+    - name: location_id
+      description: Surrogate primary key for locations, generated via dense_rank over the location string.
+      data_tests:
+        - not_null
+        - unique
+    - name: city
+      description: The city name, extracted from the first segment of the location string.
+      data_tests:
+        - not_null
+    - name: state
+      description: The state name, extracted from the second segment of the location string.
+      data_tests:
+        - not_null
+    - name: country
+      description: The country name, extracted from the third segment of the location string.
+      data_tests:
+        - not_null
+```

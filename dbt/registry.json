@@ -1,11 +1,12 @@
 {
   "entities": {
     "dim_authors": {
-      "file": "dbt/models/bigquery/staging/dim_authors.sql",
-      "last_generated": "2026-06-12T19:45:36.612750Z",
+      "contract_hash": "acafab26360c98cb",
+      "contract_yaml": "contracts/book_catalog/dim_authors_v1.0.0.yaml",
+      "domain": "book_catalog",
+      "file": "dbt/models/book_catalog/staging/dim_authors.sql",
+      "last_generated": "2026-06-15T16:12:43.676340Z",
       "layer": "staging",
-      "mapping_file": "mapping/data_model_mapping_final.xlsx",
-      "mapping_hash": "4292df5f16b95943",
       "output_columns": [
         "author_id",
         "author_name"
@@ -13,14 +14,16 @@
       "refs": [],
       "sources": [
         "books"
-      ]
+      ],
+      "version": "1.0.0"
     },
     "dim_books": {
-      "file": "dbt/models/bigquery/staging/dim_books.sql",
-      "last_generated": "2026-06-12T19:50:21.919656Z",
+      "contract_hash": "4d6cef206d8efe71",
+      "contract_yaml": "contracts/book_catalog/dim_books_v1.0.0.yaml",
+      "domain": "book_catalog",
+      "file": "dbt/models/book_catalog/staging/dim_books.sql",
+      "last_generated": "2026-06-15T16:25:44.199663Z",
       "layer": "staging",
-      "mapping_file": "mapping/data_model_mapping_final.xlsx",
-      "mapping_hash": "623595aa3084c667",
       "output_columns": [
         "book_id",
         "title",
@@ -34,14 +37,16 @@
       "refs": [],
       "sources": [
         "books"
-      ]
+      ],
+      "version": "1.0.0"
     },
     "dim_location": {
-      "file": "dbt/models/bigquery/staging/dim_location.sql",
-      "last_generated": "2026-06-12T20:00:21.845891Z",
+      "contract_hash": "75b3858fa5ccdbe2",
+      "contract_yaml": "contracts/user_analytics/dim_location_v1.0.0.yaml",
+      "domain": "user_analytics",
+      "file": "dbt/models/user_analytics/staging/dim_location.sql",
+      "last_generated": "2026-06-15T16:41:59.772727Z",
       "layer": "staging",
-      "mapping_file": "mapping/data_model_mapping_final.xlsx",
-      "mapping_hash": "fc03eb43d2c0b568",
       "output_columns": [
         "location_id",
         "city",
@@ -51,14 +56,16 @@
       "refs": [],
       "sources": [
         "users"
-      ]
+      ],
+      "version": "1.0.0"
     },
     "dim_publishers": {
-      "file": "dbt/models/bigquery/staging/dim_publishers.sql",
-      "last_generated": "2026-06-12T20:11:36.774696Z",
+      "contract_hash": "840db83b13141ee3",
+      "contract_yaml": "contracts/book_catalog/dim_publishers_v1.0.0.yaml",
+      "domain": "book_catalog",
+      "file": "dbt/models/book_catalog/staging/dim_publishers.sql",
+      "last_generated": "2026-06-15T16:50:35.408904Z",
       "layer": "staging",
-      "mapping_file": "mapping/data_model_mapping_final.xlsx",
-      "mapping_hash": "4220f1bd48b74fed",
       "output_columns": [
         "publisher_id",
         "publisher_name"
@@ -66,14 +73,16 @@
       "refs": [],
       "sources": [
         "books"
-      ]
+      ],
+      "version": "1.0.0"
     },
     "dim_users": {
-      "file": "dbt/models/bigquery/staging/dim_users.sql",
-      "last_generated": "2026-06-12T20:27:40.225676Z",
+      "contract_hash": "87ee2852164d93e9",
+      "contract_yaml": "contracts/user_analytics/dim_users_v1.0.0.yaml",
+      "domain": "user_analytics",
+      "file": "dbt/models/user_analytics/staging/dim_users.sql",
+      "last_generated": "2026-06-15T17:05:42.108906Z",
       "layer": "staging",
-      "mapping_file": "mapping/data_model_mapping_final.xlsx",
-      "mapping_hash": "bf82be9ea84b44c2",
       "output_columns": [
         "user_id",
         "location_raw",
@@ -83,14 +92,16 @@
       "refs": [],
       "sources": [
         "users"
-      ]
+      ],
+      "version": "1.0.0"
     },
     "fact_book_ratings": {
-      "file": "dbt/models/bigquery/staging/fact_book_ratings.sql",
-      "last_generated": "2026-06-12T20:34:08.624194Z",
-      "layer": "staging",
-      "mapping_file": "mapping/data_model_mapping_final.xlsx",
-      "mapping_hash": "751fb367c855c700",
+      "contract_hash": "3f47c1bd93e729ef",
+      "contract_yaml": "contracts/book_ratings/fact_book_ratings_v1.0.0.yaml",
+      "domain": "book_ratings",
+      "file": "dbt/models/book_ratings/marts/fact_book_ratings.sql",
+      "last_generated": "2026-06-15T17:27:10.192558Z",
+      "layer": "marts",
       "output_columns": [
         "rating_id",
         "user_id",
@@ -99,17 +110,24 @@
         "rating_category",
         "rating_date"
       ],
-      "refs": [],
+      "refs": [
+        "dim_users",
+        "dim_books"
+      ],
       "sources": [
+        "dim_users",
+        "dim_books",
         "ratings"
-      ]
+      ],
+      "version": "1.0.0"
     },
     "fct_user_book_insights": {
-      "file": "dbt/models/bigquery/staging/fct_user_book_insights.sql",
-      "last_generated": "2026-06-12T20:45:59.814319Z",
-      "layer": "staging",
-      "mapping_file": "mapping/data_model_mapping_final.xlsx",
-      "mapping_hash": "f905ffa9e90b5ee1",
+      "contract_hash": "9a17884993fcce2f",
+      "contract_yaml": "contracts/book_insights/fct_user_book_insights_v1.0.0.yaml",
+      "domain": "book_insights",
+      "file": "dbt/models/book_insights/marts/fct_user_book_insights.sql",
+      "last_generated": "2026-06-15T17:46:56.731619Z",
+      "layer": "marts",
       "output_columns": [
         "insight_id",
         "user_id",
@@ -123,12 +141,16 @@
         "user_location_country",
         "high_rating_flag"
       ],
-      "refs": [],
+      "refs": [
+        "dim_users",
+        "dim_books"
+      ],
       "sources": [
-        "books",
-        "ratings",
-        "users"
-      ]
+        "dim_users",
+        "dim_books",
+        "ratings"
+      ],
+      "version": "1.0.0"
     }
   },
   "raw_tables": {

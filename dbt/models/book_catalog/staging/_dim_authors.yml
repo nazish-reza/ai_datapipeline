@@ -1,0 +1,12 @@
+version: 2
+models:
+- name: dim_authors
+  description: Dimension table of authors with one row per author.
+  columns:
+  - name: author_id
+    description: Surrogate primary key generated via dense_rank() over author name.
+    data_tests:
+    - not_null
+    - unique
+  - name: author_name
+    description: Distinct trimmed author name.
